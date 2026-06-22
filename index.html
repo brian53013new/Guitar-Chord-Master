@@ -24,9 +24,14 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel">
-        /** @jsx React.createElement */
-        /** @jsxFrag React.Fragment */
+    <script>
+      if (window.Babel) {
+        Babel.registerPreset("react-classic", {
+          presets: [[Babel.availablePresets.react, { runtime: "classic" }]]
+        });
+      }
+    </script>
+    <script type="text/babel" data-presets="react-classic,env">
         const { useState, useEffect, useMemo } = React;
 
         /* 音訊引擎 */
