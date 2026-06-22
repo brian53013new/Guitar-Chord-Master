@@ -1,0 +1,132 @@
+/* --- 吉他顧問：頂級藝術館視覺系統 --- */
+
+:root {
+  --gallery-bg: #121212;
+  --bronze: #C5A059;
+  --panel: #1A1A1A;
+  --fret-line: rgba(197, 160, 89, 0.2);
+  --string-line: rgba(255, 255, 255, 0.08);
+  --text-white: #FFFFFF;
+  --text-gray: #888888;
+  --text-main: #CCCCCC;
+  --border: rgba(197, 160, 89, 0.1);
+}
+
+.light-mode {
+  --gallery-bg: #FDFDFB;
+  --bronze: #8B6B23;
+  --panel: #FFFFFF;
+  --fret-line: rgba(139, 107, 35, 0.2);
+  --string-line: rgba(0, 0, 0, 0.08);
+  --text-white: #1A1A1A;
+  --text-gray: #777777;
+  --text-main: #333333;
+  --border: rgba(139, 107, 35, 0.15);
+}
+
+/* 客製化滑動條 (Scrollbar) */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--gallery-bg); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bronze); }
+
+body {
+  margin: 0; padding: 0; background-color: var(--gallery-bg);
+  color: var(--text-main); font-family: 'Inter', "Microsoft JhengHei", sans-serif;
+  letter-spacing: 0.05em; overflow-x: hidden; transition: all 0.4s ease;
+}
+
+/* 頂部 Header */
+.gallery-header {
+  border-bottom: 1px solid var(--border);
+  padding: 4rem 2rem 2rem 2rem; text-align: center;
+}
+.gallery-title {
+  font-family: 'Playfair Display', serif; font-size: 2.5rem;
+  color: var(--bronze); margin-bottom: 0.5rem; letter-spacing: 0.15em;
+}
+.edition-label {
+  font-size: 0.6rem; letter-spacing: 0.4em; color: var(--text-gray);
+  text-transform: uppercase;
+}
+
+/* 列表項 */
+.gallery-list-item {
+  border-bottom: 1px solid var(--border);
+  padding: 1.8rem 1rem; transition: all 0.4s ease;
+  cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+}
+.gallery-list-item:hover {
+  background: var(--border); padding-left: 2rem;
+}
+.gallery-list-item h3 { font-family: 'Playfair Display', serif; font-size: 1.5rem; color: var(--text-white); margin: 0; }
+
+/* 橫向指板板塊 */
+.fretboard-frame {
+  display: flex; align-items: flex-start; margin: 3rem auto; padding: 2.5rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15); overflow-x: auto;
+}
+
+.string-labels-side { display: flex; flex-direction: column; margin-right: 20px; }
+.string-tag {
+  height: 40px; display: flex; align-items: center; justify-content: flex-end;
+  font-size: 10px; color: var(--bronze); font-weight: 600; font-family: serif;
+}
+
+.fret-grid-master { display: flex; position: relative; }
+
+.fret-col {
+  width: 70px; display: flex; flex-direction: column; border-right: 1px solid var(--fret-line);
+  position: relative;
+}
+.fret-col.nut { width: 14px; border-right: 4px solid var(--bronze); }
+
+.fret-space {
+  height: 40px; width: 100%; display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.fret-space::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+  background: var(--string-line); transform: translateY(-50%); z-index: 1;
+}
+
+.inlay-dot {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--bronze); opacity: 0.1;
+}
+
+.note-orb {
+  width: 28px; height: 28px; border-radius: 50%; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; cursor: pointer; transition: 0.3s;
+  background: var(--gallery-bg); border: 2px solid var(--bronze); color: var(--bronze);
+}
+.note-orb.root { background: var(--bronze); color: var(--gallery-bg); }
+.note-orb:hover { transform: scale(1.15); box-shadow: 0 0 20px rgba(197, 160, 89, 0.4); }
+
+.fret-nums-bar { display: flex; margin-top: 15px; padding-left: 14px; }
+.fret-n { width: 70px; text-align: center; font-size: 9px; color: var(--text-gray); font-family: monospace; }
+
+.catalog-label { font-size: 0.7rem; letter-spacing: 0.3em; color: var(--bronze); text-transform: uppercase; margin-bottom: 0.8rem; opacity: 0.7; }
+
+/* 切換按鈕樣式 */
+.utility-btn {
+  font-size: 9px; letter-spacing: 0.2em; color: var(--text-gray);
+  background: transparent; border: 1px solid var(--border);
+  padding: 0.4rem 0.8rem; border-radius: 20px; cursor: pointer;
+  transition: all 0.3s; text-transform: uppercase;
+}
+.utility-btn:hover { color: var(--bronze); border-color: var(--bronze); }
+.utility-btn.active { color: var(--bronze); border-color: var(--bronze); background: rgba(197, 160, 89, 0.05); }
+
+.minimal-btn {
+  border: 1px solid var(--bronze); padding: 0.7rem 1.8rem; color: var(--bronze);
+  background: transparent; cursor: pointer; font-size: 0.8rem; letter-spacing: 0.1em; transition: 0.3s;
+}
+.minimal-btn:hover { background: var(--bronze); color: var(--gallery-bg); }
+
+.animate-in { animation: fadeIn 0.6s cubic-bezier(0.2, 1, 0.3, 1) forwards; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+
+.gallery-overlay { position: fixed; inset: 0; background: var(--gallery-bg); z-index: 300; padding: 4rem; overflow-y: auto; }

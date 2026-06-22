@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>吉他顧問 - 2026 典藏版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/styles.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { serif: ['"Playfair Display"', 'serif'], sans: ['Inter', 'sans-serif'] },
+            colors: { gallery: '#121212', bronze: '#C5A059' }
+          }
+        }
+      }
+    </script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        /* 音訊引擎 */
+        const MIDI_OPEN = {6:40, 5:45, 4:50, 3:55, 2:59, 1:64};
+        const playNotes = (dots) => {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const now = ctx.currentTime;
+            dots.sort((a,b)=>a.string-b.string).forEach((n, i) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                const midi = MIDI_OPEN[n.string] + n.fret;
+                osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+                osc.connect(gain); gain.connect(ctx.destination);
+                const start = now + (i * 0.05);
+                gain.gain.setValueAtTime(0, start);
+                gain.gain.linearRampToValueAtTime(0.12, start + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, start + 1.8);
+                osc.start(start); osc.stop(start + 1.8);
+            });
+        };
+
+        const NOTES_C = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+        const OPEN_S = {6:4, 5:9, 4:2, 3:7, 2:11, 1:4};
+        const DEG_L = { 0: "1", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4", 6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7" };
+
+        const getRequiredIntervals = (intervals, count) => {
+            let required = [...intervals];
+            if (required.length <= count) return required;
+            
+            const dropOrder = [7, 2, 5, 9]; // 5th, 9th, 11th, 6th/13th
+            for (let d of dropOrder) {
+                if (required.includes(d) && required.length > count) {
+                    required = required.filter(i => i !== d);
+                }
+            }
+            while (required.length > count) required.pop();
+            return required;
+        };
+
+        const generateVoicings = (rootPc, typeObj, stringsCount, group) => {
+            const intervals = typeObj.intervals;
+            let sets = [];
+            if (group === 'root6') sets = stringsCount === 3 ? [[6,5,4], [6,4,3]] : [[6,5,4,3], [6,4,3,2]];
+            else if (group === 'root5') sets = stringsCount === 3 ? [[5,4,3]] : [[5,4,3,2]];
+            else if (group === 'mid') sets = stringsCount === 3 ? [[4,3,2]] : [[4,3,2,1]];
+            else if (group === 'high') sets = stringsCount === 3 ? [[3,2,1]] : [[4,3,2,1]];
+
+            const req = getRequiredIntervals(intervals, stringsCount);
+            const reqPcs = req.map(i => (rootPc + i) % 12);
+            let voicings = [];
+            
+            sets.forEach(strSet => {
+                const build = (strIdx, currentVoicing) => {
+                    if (strIdx === strSet.length) {
+                        const playedPcs = currentVoicing.map(v => v.pc);
+                        if (reqPcs.every(rpc => playedPcs.includes(rpc))) voicings.push(currentVoicing);
+                        return;
+                    }
+                    const s = strSet[strIdx];
+                    for (let f = 0; f <= 16; f++) {
+                        const pc = (OPEN_S[s] + f) % 12;
+                        if (intervals.includes((pc - rootPc + 12) % 12)) {
+                            const frets = currentVoicing.map(v => v.fret).filter(fr => fr > 0);
+                            if (f > 0) frets.push(f);
+                            if (frets.length > 0 && Math.max(...frets) - Math.min(...frets) > 4) continue;
+                            if (strIdx === 0 && (group === 'root6' || group === 'root5') && pc !== rootPc) continue;
+                            
+                            build(strIdx + 1, [...currentVoicing, { string: s, fret: f, pc, note: NOTES_C[pc], degree: DEG_L[(pc - rootPc + 12) % 12], isRoot: pc === rootPc }]);
+                        }
+                    }
+                };
+                build(0, []);
+            });
+            
+            voicings.sort((a, b) => {
+                const avgA = a.reduce((sum, v) => sum + v.fret, 0) / a.length;
+                const avgB = b.reduce((sum, v) => sum + v.fret, 0) / b.length;
+                return avgA - avgB;
+            });
+            return voicings;
+        };
+
+        /* 指板板塊 - 精確對齊版 */
+        const Fretboard = ({ dots, disp }) => (
+            <div className="fretboard-frame animate-in">
+                <div className="string-labels-side">
+                    {[1,2,3,4,5,6].map(s => <div key={s} className="string-tag">{s === 1 ? '1st' : s === 6 ? '6th' : `${s}`}</div>)}
+                </div>
+                <div className="flex flex-col">
+                    <div className="fret-grid-master">
+                        {/* 琴枕 */}
+                        <div className="fret-col nut">
+                            {[1,2,3,4,5,6].map(s => (
+                                <div key={s} className="fret-space">
+                                    {dots.filter(d=>d.string===s && d.fret===0).map((d,idx) => (
+                                        <div key={idx} className={`note-orb ${d.isRoot?'root':''}`} onClick={()=>playNotes([d])}>
+                                            {disp==='note' ? d.note : d.degree}
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                        {/* 品格 1-24 */}
+                        {Array.from({length: 24}).map((_, f) => {
+                            const fret = f + 1;
+                            return (
+                                <div key={fret} className="fret-col">
+                                    {[3,5,7,9,12,15,17,19,21,24].includes(fret) && <div className="inlay-dot"></div>}
+                                    {[1,2,3,4,5,6].map(s => (
+                                        <div key={s} className="fret-space">
+                                            {dots.filter(d=>d.string===s && d.fret===fret).map((d,idx) => (
+                                                <div key={idx} className={`note-orb ${d.isRoot?'root':''}`} onClick={()=>playNotes([d])}>
+                                                    {disp==='note' ? d.note : d.degree}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    <div className="fret-nums-bar">
+                        {Array.from({length: 24}).map((_, i) => <div key={i} className="fret-n">{i+1}</div>)}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const DetailSheet = ({ root, typeObj, mode, onClose, t, lang }) => {
+            const [disp, setDisp] = useState('note');
+            const [vMode, setVMode] = useState('arpeggio');
+            const [sCount, setSCount] = useState(4);
+            const [sGroup, setSGroup] = useState('root6');
+            const [vIndex, setVIndex] = useState(0);
+
+            const { dots, availableVoicings } = useMemo(() => {
+                const rootPc = NOTES_C.indexOf(root);
+                if (mode === 'chord' && vMode === 'voicing') {
+                    const vs = generateVoicings(rootPc, typeObj, sCount, sGroup);
+                    return { dots: vs[vIndex] || [], availableVoicings: vs.length };
+                }
+
+                const res = [];
+                for (let s=1; s<=6; s++) {
+                    for (let f=0; f<=24; f++) {
+                        const pc = (OPEN_S[s] + f) % 12;
+                        if (typeObj.intervals.includes((pc - rootPc + 12) % 12)) {
+                            res.push({ string: s, fret: f, pc, note: NOTES_C[pc], degree: DEG_L[(pc - rootPc + 12) % 12], isRoot: pc === rootPc });
+                        }
+                    }
+                }
+                return { dots: res, availableVoicings: 0 };
+            }, [root, typeObj, mode, vMode, sCount, sGroup, vIndex]);
+
+            return (
+                <div className="gallery-overlay animate-in">
+                    <div className="max-w-6xl mx-auto">
+                        <button onClick={onClose} className="mb-12 text-bronze text-[11px] uppercase tracking-[0.4em] flex items-center hover:opacity-50 transition">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mr-2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                            {t.back}
+                        </button>
+                        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-10">
+                            <div>
+                                <div className="catalog-label">{mode==='chord'? t.chord : t.scale}</div>
+                                <h2 className="text-6xl font-serif text-white">{root} {lang === 'zh' ? typeObj.zh : (typeObj.en || typeObj.zh)}</h2>
+                            </div>
+                            <div className="flex flex-col gap-4 items-end">
+                                <div className="flex gap-4">
+                                    <button onClick={()=>playNotes(dots)} className="minimal-btn">{t.play}</button>
+                                    <button onClick={()=>setDisp(disp==='note'?'deg':'note')} className="minimal-btn">
+                                        {lang === 'zh' ? (disp === 'note' ? '顯示度數' : '顯示音名') : (disp === 'note' ? 'Show Degrees' : 'Show Notes')}
+                                    </button>
+                                </div>
+                                {mode === 'chord' && (
+                                    <div className="flex bg-white/5 rounded-full p-1 mt-2">
+                                        <button onClick={()=>setVMode('arpeggio')} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='arpeggio'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
+                                            {lang==='zh'?'琶音全景':'Arpeggio'}
+                                        </button>
+                                        <button onClick={()=>{setVMode('voicing'); setVIndex(0);}} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='voicing'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
+                                            {lang==='zh'?'具體按法':'Voicing'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {mode === 'chord' && vMode === 'voicing' && (
+                            <div className="flex flex-col md:flex-row gap-6 mb-12 border-y border-white/5 py-6 items-center justify-between">
+                                <div className="flex gap-4 items-center">
+                                    <span className="text-[10px] text-zinc-500 uppercase tracking-widest">{lang==='zh'?'指型弦數':'Strings'}:</span>
+                                    {[3, 4].map(c => (
+                                        <button key={c} onClick={()=>{setSCount(c); setVIndex(0);}} className={`text-[11px] px-3 py-1 border transition-all ${sCount===c?'text-bronze border-bronze':'text-zinc-600 border-transparent hover:text-zinc-400'}`}>
+                                            {c} {lang==='zh'?'弦':'Str'}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex gap-4 overflow-x-auto no-scrollbar">
+                                    {[
+                                        {id:'root6', label: lang==='zh'?'低音1 (第6弦)':'Low 1 (6th)'},
+                                        {id:'root5', label: lang==='zh'?'低音2 (第5弦)':'Low 2 (5th)'},
+                                        {id:'mid', label: lang==='zh'?'中音':'Mid'},
+                                        {id:'high', label: lang==='zh'?'高音':'High'}
+                                    ].map(g => (
+                                        <button key={g.id} onClick={()=>{setSGroup(g.id); setVIndex(0);}} className={`whitespace-nowrap text-[11px] tracking-widest pb-1 border-b transition-all ${sGroup===g.id?'text-bronze border-bronze':'text-zinc-700 border-transparent hover:text-zinc-500'}`}>
+                                            {g.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {availableVoicings > 0 ? (
+                                    <div className="flex items-center gap-4 text-[11px] tracking-widest text-zinc-400">
+                                        <button onClick={()=>setVIndex(v => Math.max(0, v-1))} disabled={vIndex===0} className="hover:text-white disabled:opacity-30">&larr;</button>
+                                        <span>{lang==='zh'?'變體':'Variant'} {vIndex + 1} / {availableVoicings}</span>
+                                        <button onClick={()=>setVIndex(v => Math.min(availableVoicings-1, v+1))} disabled={vIndex===availableVoicings-1} className="hover:text-white disabled:opacity-30">&rarr;</button>
+                                    </div>
+                                ) : (
+                                    <div className="text-[11px] tracking-widest text-red-400">{lang==='zh'?'無適合按法':'No Voicing Found'}</div>
+                                )}
+                            </div>
+                        )}
+
+                        <Fretboard dots={dots} disp={disp} />
+                    </div>
+                </div>
+            );
+        };
+
+        function App() {
+            const [db, setDb] = useState(null);
+            const [mode, setMode] = useState('chord');
+            const [catId, setCatId] = useState(null);
+            const [typeObj, setTypeObj] = useState(null);
+            const [detail, setDetail] = useState(null);
+            const [lang, setLang] = useState('zh');
+            const [isLight, setIsLight] = useState(false);
+
+            useEffect(() => {
+                Promise.all([
+                    fetch('/api/config').then(r => r.json()),
+                    fetch('/api/chords').then(r => r.json()),
+                    fetch('/api/scales').then(r => r.json())
+                ]).then(([c, ch, sc]) => setDb({ c, ch, sc }));
+            }, []);
+
+            useEffect(() => {
+                if (isLight) document.body.classList.add('light-mode');
+                else document.body.classList.remove('light-mode');
+            }, [isLight]);
+
+            if (!db) return <div className="h-screen flex items-center justify-center text-bronze tracking-[0.5em] text-[11px]">LOADING...</div>;
+            const t = db.c.TEXT[lang] || db.c.TEXT['zh'];
+
+            const renderMain = () => {
+                if (!catId) {
+                    const list = mode === 'chord' ? db.ch.CHORD_CATEGORIES : db.sc.SCALE_CATEGORIES;
+                    return (
+                        <div className="max-w-3xl mx-auto mt-20 animate-in">
+                            <div className="catalog-label text-center mb-10">{lang==='zh'?'分類目錄':'Categories'}</div>
+                            {list.map((c, i) => (
+                                <div key={c.id} onClick={()=>setCatId(c.id)} className="gallery-list-item">
+                                    <h3 className="font-serif">{t.cat[c.key] || c.id}</h3>
+                                    <span className="text-bronze opacity-50 text-[10px] tracking-widest uppercase">{lang==='zh'?'選擇':'Select'}</span>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                }
+                if (!typeObj) {
+                    const cat = (mode === 'chord' ? db.ch.CHORD_CATEGORIES : db.sc.SCALE_CATEGORIES).find(x => x.id === catId);
+                    const items = mode === 'chord' ? db.ch.CHORD_TYPES.filter(it => cat.list.includes(it.id)) : db.sc.SCALES.filter(it => cat.list.includes(it.id));
+                    return (
+                        <div className="max-w-3xl mx-auto mt-20 animate-in">
+                            <button onClick={()=>setCatId(null)} className="mb-12 text-bronze text-[11px] uppercase tracking-[0.4em] flex items-center hover:opacity-50 transition">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mr-2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                                {t.back}
+                            </button>
+                            <div className="catalog-label mb-8">{t.cat[cat.key]}</div>
+                            {items.map((it, i) => (
+                                <div key={it.id} onClick={()=>setTypeObj(it)} className="gallery-list-item">
+                                    <div className="flex flex-col">
+                                        <span className="text-white text-xl font-serif">{lang==='zh'? it.zh : (it.en || it.zh)}</span>
+                                        <span className="text-[10px] text-zinc-600 tracking-widest mt-1 uppercase font-mono">{it.formula || it.id}</span>
+                                    </div>
+                                    <span className="text-[10px] text-bronze/40 font-mono">#{String(i+1).padStart(3,'0')}</span>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                }
+                return (
+                    <div className="max-w-4xl mx-auto mt-20 text-center animate-in">
+                        <button onClick={()=>setTypeObj(null)} className="mb-12 text-bronze text-[11px] uppercase tracking-[0.4em] flex items-center justify-center hover:opacity-50 transition mx-auto">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mr-2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                            {t.back}
+                        </button>
+                        <div className="catalog-label">{lang==='zh'?'選擇根音':'Select Root'}</div>
+                        <h2 className="text-5xl text-white mb-20 font-serif">{lang==='zh'? typeObj.zh : (typeObj.en || typeObj.zh)}</h2>
+                        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-6">
+                            {NOTES_C.map((n, i) => (
+                                <button key={n} onClick={()=>setDetail({root:n, typeObj, mode})} className="border border-white/5 py-12 text-white font-serif text-2xl hover:border-bronze hover:text-bronze transition-all">
+                                    {n}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen pb-40">
+                    <div className="fixed top-8 right-8 flex gap-4 z-[1000] animate-in">
+                        <button className={`utility-btn ${lang==='zh'?'active':''}`} onClick={()=>setLang('zh')}>ZH</button>
+                        <button className={`utility-btn ${lang==='en'?'active':''}`} onClick={()=>setLang('en')}>EN</button>
+                        <div className="w-4"></div>
+                        <button className="utility-btn" onClick={()=>setIsLight(!isLight)}>
+                            {isLight ? 'DARK' : 'LIGHT'}
+                        </button>
+                    </div>
+                    <header className="gallery-header animate-in">
+                        <h1 className="gallery-title">{t.title}</h1>
+                        <div className="edition-label">{t.edition} / 2026 典藏版</div>
+                        <div className="mt-16 flex justify-center gap-16">
+                            <button onClick={()=>{setMode('chord'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='chord'?'text-bronze border-bronze':'text-zinc-800 border-transparent'}`}>{t.chord}</button>
+                            <button onClick={()=>{setMode('scale'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='scale'?'text-bronze border-bronze':'text-zinc-800 border-transparent'}`}>{t.scale}</button>
+                        </div>
+                    </header>
+                    <main>{renderMain()}</main>
+                    {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} />}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
