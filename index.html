@@ -24,7 +24,9 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-type="module">
+    <script type="text/babel">
+        /** @jsx React.createElement */
+        /** @jsxFrag React.Fragment */
         const { useState, useEffect, useMemo } = React;
 
         /* 音訊引擎 */
