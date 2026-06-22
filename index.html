@@ -71,7 +71,7 @@
             return required;
         };
 
-        const generateVoicings = (rootPc, typeObj, stringsCount, group) => {
+        const generateVoicings = (rootPc, typeObj, stringsCount, group, isFriendly = false) => {
             const intervals = typeObj.intervals;
             let sets = [];
             if (group === 'root6') sets = stringsCount === 3 ? [[6,5,4], [6,4,3]] : [[6,5,4,3], [6,4,3,2]];
@@ -96,7 +96,8 @@
                         if (intervals.includes((pc - rootPc + 12) % 12)) {
                             const frets = currentVoicing.map(v => v.fret).filter(fr => fr > 0);
                             if (f > 0) frets.push(f);
-                            if (frets.length > 0 && Math.max(...frets) - Math.min(...frets) > 4) continue;
+                            const maxSpan = isFriendly ? 2 : 4;
+                            if (frets.length > 0 && Math.max(...frets) - Math.min(...frets) > maxSpan) continue;
                             if (strIdx === 0 && (group === 'root6' || group === 'root5') && pc !== rootPc) continue;
                             
                             build(strIdx + 1, [...currentVoicing, { string: s, fret: f, pc, note: NOTES_C[pc], degree: DEG_L[(pc - rootPc + 12) % 12], isRoot: pc === rootPc }]);
@@ -166,11 +167,12 @@
             const [sCount, setSCount] = useState(4);
             const [sGroup, setSGroup] = useState('root6');
             const [vIndex, setVIndex] = useState(0);
+            const [isFriendly, setIsFriendly] = useState(false);
 
             const { dots, availableVoicings } = useMemo(() => {
                 const rootPc = NOTES_C.indexOf(root);
                 if (mode === 'chord' && vMode === 'voicing') {
-                    const vs = generateVoicings(rootPc, typeObj, sCount, sGroup);
+                    const vs = generateVoicings(rootPc, typeObj, sCount, sGroup, isFriendly);
                     return { dots: vs[vIndex] || [], availableVoicings: vs.length };
                 }
 
@@ -184,7 +186,7 @@
                     }
                 }
                 return { dots: res, availableVoicings: 0 };
-            }, [root, typeObj, mode, vMode, sCount, sGroup, vIndex]);
+            }, [root, typeObj, mode, vMode, sCount, sGroup, vIndex, isFriendly]);
 
             return (
                 <div className="gallery-overlay animate-in">
@@ -227,6 +229,9 @@
                                             {c} {lang==='zh'?'弦':'Str'}
                                         </button>
                                     ))}
+                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);}} className={`text-[11px] px-3 py-1 border transition-all ml-2 ${isFriendly?'text-bronze border-bronze bg-bronze/10':'text-zinc-600 border-zinc-800 hover:text-zinc-400'}`}>
+                                        {lang==='zh'?'友好模式':'Friendly'}
+                                    </button>
                                 </div>
                                 <div className="flex gap-4 overflow-x-auto no-scrollbar">
                                     {[
