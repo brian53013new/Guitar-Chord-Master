@@ -36,20 +36,35 @@
 
         /* 音訊引擎 */
         const MIDI_OPEN = {6:40, 5:45, 4:50, 3:55, 2:59, 1:64};
+        
+        let globalAudioCtx = null;
+        const getAudioContext = () => {
+            if (!globalAudioCtx) {
+                globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (globalAudioCtx.state === 'suspended') {
+                globalAudioCtx.resume();
+            }
+            return globalAudioCtx;
+        };
+
         const playNotes = (dots) => {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = getAudioContext();
             const now = ctx.currentTime;
-            dots.sort((a,b)=>a.string-b.string).forEach((n, i) => {
+            dots.sort((a,b)=>b.string-a.string).forEach((n, i) => {
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
                 const midi = MIDI_OPEN[n.string] + n.fret;
                 osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
-                osc.connect(gain); gain.connect(ctx.destination);
+                osc.type = 'triangle';
+                osc.connect(gain); 
+                gain.connect(ctx.destination);
                 const start = now + (i * 0.05);
                 gain.gain.setValueAtTime(0, start);
-                gain.gain.linearRampToValueAtTime(0.12, start + 0.02);
-                gain.gain.exponentialRampToValueAtTime(0.001, start + 1.8);
-                osc.start(start); osc.stop(start + 1.8);
+                gain.gain.linearRampToValueAtTime(0.3, start + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, start + 2.5);
+                osc.start(start); 
+                osc.stop(start + 2.5);
             });
         };
 
@@ -74,10 +89,16 @@
         const generateVoicings = (rootPc, typeObj, stringsCount, group, isFriendly = false) => {
             const intervals = typeObj.intervals;
             let sets = [];
-            if (group === 'root6') sets = stringsCount === 3 ? [[6,5,4], [6,4,3]] : [[6,5,4,3], [6,4,3,2]];
-            else if (group === 'root5') sets = stringsCount === 3 ? [[5,4,3]] : [[5,4,3,2]];
-            else if (group === 'mid') sets = stringsCount === 3 ? [[4,3,2]] : [[4,3,2,1]];
-            else if (group === 'high') sets = stringsCount === 3 ? [[3,2,1]] : [[4,3,2,1]];
+            if (stringsCount === 3) {
+                if (group === 'root6') sets = [[6,5,4]];
+                else if (group === 'root5') sets = [[5,4,3]];
+                else if (group === 'mid') sets = [[4,3,2]];
+                else if (group === 'high') sets = [[3,2,1]];
+            } else {
+                if (group === 'root6') sets = [[6,5,4,3]];
+                else if (group === 'root5') sets = [[5,4,3,2]];
+                else if (group === 'mid' || group === 'high') sets = [[4,3,2,1]];
+            }
 
             const req = getRequiredIntervals(intervals, stringsCount);
             const reqPcs = req.map(i => (rootPc + i) % 12);
@@ -96,9 +117,10 @@
                         if (intervals.includes((pc - rootPc + 12) % 12)) {
                             const frets = currentVoicing.map(v => v.fret).filter(fr => fr > 0);
                             if (f > 0) frets.push(f);
-                            const maxSpan = isFriendly ? 2 : 4;
+                            const maxSpan = isFriendly ? 3 : 4;
                             if (frets.length > 0 && Math.max(...frets) - Math.min(...frets) > maxSpan) continue;
-                            if (strIdx === 0 && (group === 'root6' || group === 'root5') && pc !== rootPc) continue;
+                            if (strIdx === 0 && (group === 'root6' || group === 'root5' || group === 'mid') && stringsCount === 4 && pc !== rootPc) continue;
+                            if (strIdx === 0 && stringsCount === 3 && (group === 'root6' || group === 'root5') && pc !== rootPc) continue;
                             
                             build(strIdx + 1, [...currentVoicing, { string: s, fret: f, pc, note: NOTES_C[pc], degree: DEG_L[(pc - rootPc + 12) % 12], isRoot: pc === rootPc }]);
                         }
@@ -234,12 +256,16 @@
                                     </button>
                                 </div>
                                 <div className="flex gap-4 overflow-x-auto no-scrollbar">
-                                    {[
-                                        {id:'root6', label: lang==='zh'?'低音1 (第6弦)':'Low 1 (6th)'},
-                                        {id:'root5', label: lang==='zh'?'低音2 (第5弦)':'Low 2 (5th)'},
-                                        {id:'mid', label: lang==='zh'?'中音':'Mid'},
-                                        {id:'high', label: lang==='zh'?'高音':'High'}
-                                    ].map(g => (
+                                    {(sCount === 3 ? [
+                                        {id:'root6', label: lang==='zh'?'第 6-5-4 弦':'Strings 6-5-4'},
+                                        {id:'root5', label: lang==='zh'?'第 5-4-3 弦':'Strings 5-4-3'},
+                                        {id:'mid', label: lang==='zh'?'第 4-3-2 弦':'Strings 4-3-2'},
+                                        {id:'high', label: lang==='zh'?'第 3-2-1 弦':'Strings 3-2-1'}
+                                    ] : [
+                                        {id:'root6', label: lang==='zh'?'根音在第6弦':'Root on 6th'},
+                                        {id:'root5', label: lang==='zh'?'根音在第5弦':'Root on 5th'},
+                                        {id:'mid', label: lang==='zh'?'根音在第4弦':'Root on 4th'}
+                                    ]).map(g => (
                                         <button key={g.id} onClick={()=>{setSGroup(g.id); setVIndex(0);}} className={`whitespace-nowrap text-[11px] tracking-widest pb-1 border-b transition-all ${sGroup===g.id?'text-bronze border-bronze':'text-zinc-700 border-transparent hover:text-zinc-500'}`}>
                                             {g.label}
                                         </button>
@@ -321,17 +347,22 @@
                     mk("7sus4","7sus4","屬七掛四","1-4-5-b7",[0,5,7,10]), mk("9","9","屬九和弦","1-3-5-b7-9",[0,4,7,10,2]),
                     mk("Maj9","Maj9","大九和弦","1-3-5-7-9",[0,4,7,11,2]), mk("m9","m9","小九和弦","1-b3-5-b7-9",[0,3,7,10,2]),
                     mk("11","11","屬十一和弦","1-3-5-b7-9-11",[0,4,7,10,2,5]), mk("13","13","屬十三和弦","1-3-5-b7-9-13",[0,4,7,10,2,9]),
-                    mk("add9","add9","加九和弦","1-3-5-9",[0,4,7,2]), mk("sus2sus4","雙掛留","1-2-4-5",[0,2,5,7])
+                    mk("add9","add9","加九和弦","1-3-5-9",[0,4,7,2]), mk("sus2sus4","雙掛留","1-2-4-5",[0,2,5,7]),
+                    mk("Maj7#11","Maj7#11","大七升十一","1-3-5-7-#11",[0,4,7,11,6]), mk("m11","m11","小十一和弦","1-b3-5-b7-9-11",[0,3,7,10,2,5]),
+                    mk("13b9","13b9","十三降九","1-3-5-b7-b9-13",[0,4,7,10,1,9]), mk("7b9","7b9","屬七降九","1-3-5-b7-b9",[0,4,7,10,1]),
+                    mk("7#9","7#9","屬七升九","1-3-5-b7-#9",[0,4,7,10,3]), mk("7b13","7b13","屬七降十三","1-3-5-b7-b13",[0,4,7,10,8]),
+                    mk("Maj13","Maj13","大十三和弦","1-3-5-7-9-13",[0,4,7,11,2,9]), mk("m13","m13","小十三和弦","1-b3-5-b7-9-13",[0,3,7,10,2,9]),
+                    mk("m9b5","m9b5","半減九和弦","1-b3-b5-b7-9",[0,3,6,10,2]), mk("dimMaj7","dimMaj7","減大七和弦","1-b3-b5-7",[0,3,6,11])
                 ];
 
                 const CHORD_CATEGORIES = [
                     {id:"triads", key:"triads", list:["Maj","m","dim","aug","sus2","sus4"]},
                     {id:"sixths", key:"sixths", list:["6","m6","69","m69"]},
-                    {id:"sevenths", key:"sevenths", list:["Maj7","7","m7","mMaj7","m7b5","dim7","aug7"]},
-                    {id:"dom_plus", key:"dom_plus", list:["7alt","7sus4"]},
-                    {id:"ninths", key:"ninths", list:["9","Maj9","m9"]},
-                    {id:"elevenths", key:"elevenths", list:["11"]},
-                    {id:"thirteenths", key:"thirteenths", list:["13"]},
+                    {id:"sevenths", key:"sevenths", list:["Maj7","7","m7","mMaj7","m7b5","dim7","aug7","Maj7#11","dimMaj7"]},
+                    {id:"dom_plus", key:"dom_plus", list:["7alt","7sus4","7b9","7#9","7b13"]},
+                    {id:"ninths", key:"ninths", list:["9","Maj9","m9","m9b5"]},
+                    {id:"elevenths", key:"elevenths", list:["11","m11"]},
+                    {id:"thirteenths", key:"thirteenths", list:["13","Maj13","m13","13b9"]},
                     {id:"added", key:"added", list:["add9"]},
                     {id:"special", key:"special", list:["sus2sus4"]}
                 ];
