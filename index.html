@@ -477,6 +477,17 @@
                     </header>
                     <main>{renderMain()}</main>
                     {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} />}
+                    <footer className="text-center py-10 mt-20 border-t border-white/5">
+                        <p className="text-[10px] text-zinc-600 tracking-[0.25em] uppercase">
+                            © 2026 Brian&amp;Code. All Rights Reserved.
+                        </p>
+                        <p className="text-[10px] text-zinc-700 tracking-widest mt-2">
+                            {lang === 'zh' ? '更多作品請至' : 'Visit us at'}{' '}
+                            <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="text-bronze/60 hover:text-bronze transition-colors underline underline-offset-2">
+                                {lang === 'zh' ? 'Brian&Code 官方網站' : 'Brian&Code Official Website'}
+                            </a>
+                        </p>
+                    </footer>
                 </div>
             );
         }
