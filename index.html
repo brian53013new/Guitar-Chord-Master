@@ -6,6 +6,18 @@
     <title>吉他顧問 - 2026 典藏版</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./src/styles.css">
+    <script>
+      (function () {
+        const key = 'guitar-advisor-theme';
+        const allowed = ['classic', 'dark-professional', 'minimal-light', 'vintage-jazz', 'tech-blue', 'forest-green'];
+        try {
+          const saved = localStorage.getItem(key);
+          document.documentElement.dataset.theme = allowed.includes(saved) ? saved : 'classic';
+        } catch (_) {
+          document.documentElement.dataset.theme = 'classic';
+        }
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -128,69 +140,75 @@
         const OPEN_S = {6:4, 5:9, 4:2, 3:7, 2:11, 1:4};
         const DEG_L = { 0: "1", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4", 6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7" };
 
-        const getRequiredIntervals = (intervals, count) => {
-            let required = [...intervals];
-            if (required.length <= count) return required;
-            
-            const dropOrder = [7, 2, 5, 9]; // 5th, 9th, 11th, 6th/13th
-            for (let d of dropOrder) {
-                if (required.includes(d) && required.length > count) {
-                    required = required.filter(i => i !== d);
-                }
-            }
-            while (required.length > count) required.pop();
-            return required;
+        const intervalSet = (intervals, candidates) => candidates.filter(i => intervals.includes(i));
+
+        const voicingRequirements = (intervals, stringCount, includeRoot) => {
+            const third = intervalSet(intervals, [3,4]);
+            const seventh = intervalSet(intervals, [9,10,11]);
+            const colors = intervalSet(intervals, [1,2,5,6,8]).filter(i => !third.includes(i));
+            const required = [];
+            if (includeRoot && intervals.includes(0)) required.push(0);
+            if (third.length) required.push(third[0]);
+            else if (intervals.includes(5)) required.push(5);
+            if (seventh.length) required.push(seventh[0]);
+            if (colors.length && required.length < stringCount) required.push(colors[colors.length - 1]);
+            if (!includeRoot && !seventh.length && colors.length && required.length < Math.min(3, stringCount)) required.push(colors[0]);
+            return [...new Set(required)].slice(0, stringCount);
         };
 
-        const generateVoicings = (rootPc, typeObj, stringsCount, group, isFriendly = false) => {
+        const generateVoicings = (rootPc, typeObj, selectedStrings, includeRoot = true, isFriendly = false) => {
+            const strings = [...selectedStrings].sort((a,b)=>b-a);
+            if (strings.length < 2) return [];
             const intervals = typeObj.intervals;
-            let sets = [];
-            if (stringsCount === 3) {
-                if (group === 'root6') sets = [[6,5,4]];
-                else if (group === 'root5') sets = [[5,4,3]];
-                else if (group === 'mid') sets = [[4,3,2]];
-                else if (group === 'high') sets = [[3,2,1]];
-            } else {
-                if (group === 'root6') sets = [[6,5,4,3]];
-                else if (group === 'root5') sets = [[5,4,3,2]];
-                else if (group === 'mid' || group === 'high') sets = [[4,3,2,1]];
-            }
+            const required = voicingRequirements(intervals, strings.length, includeRoot);
+            if (required.length > strings.length) return [];
+            const maxSpan = isFriendly ? 3 : 5;
+            const upperFret = isFriendly ? 14 : 17;
+            const voicings = [];
+            const candidatesByString = strings.map(string => {
+                const candidates = [];
+                for (let fret=0; fret<=upperFret; fret++) {
+                    const pc = (OPEN_S[string] + fret) % 12;
+                    const interval = (pc-rootPc+12)%12;
+                    if (intervals.includes(interval) && (includeRoot || interval !== 0)) {
+                        candidates.push({string, fret, pc, note:NOTES_C[pc], degree:DEG_L[interval], isRoot:interval===0, interval});
+                    }
+                }
+                return candidates;
+            });
 
-            const req = getRequiredIntervals(intervals, stringsCount);
-            const reqPcs = req.map(i => (rootPc + i) % 12);
-            let voicings = [];
-            
-            sets.forEach(strSet => {
-                const build = (strIdx, currentVoicing) => {
-                    if (strIdx === strSet.length) {
-                        const playedPcs = currentVoicing.map(v => v.pc);
-                        if (reqPcs.every(rpc => playedPcs.includes(rpc))) voicings.push(currentVoicing);
-                        return;
-                    }
-                    const s = strSet[strIdx];
-                    for (let f = 0; f <= 16; f++) {
-                        const pc = (OPEN_S[s] + f) % 12;
-                        if (intervals.includes((pc - rootPc + 12) % 12)) {
-                            const frets = currentVoicing.map(v => v.fret).filter(fr => fr > 0);
-                            if (f > 0) frets.push(f);
-                            const maxSpan = isFriendly ? 3 : 4;
-                            if (frets.length > 0 && Math.max(...frets) - Math.min(...frets) > maxSpan) continue;
-                            if (strIdx === 0 && (group === 'root6' || group === 'root5' || group === 'mid') && stringsCount === 4 && pc !== rootPc) continue;
-                            if (strIdx === 0 && stringsCount === 3 && (group === 'root6' || group === 'root5') && pc !== rootPc) continue;
-                            
-                            build(strIdx + 1, [...currentVoicing, { string: s, fret: f, pc, note: NOTES_C[pc], degree: DEG_L[(pc - rootPc + 12) % 12], isRoot: pc === rootPc }]);
-                        }
-                    }
+            const build = (index, current) => {
+                if (voicings.length >= 500) return;
+                if (index === strings.length) {
+                    const played = new Set(current.map(n=>n.interval));
+                    if (!required.every(i=>played.has(i))) return;
+                    if (includeRoot && !played.has(0)) return;
+                    if (!includeRoot && played.has(0)) return;
+                    const thirdOrSus = intervalSet(intervals,[3,4,5]);
+                    if (thirdOrSus.length && !thirdOrSus.some(i=>played.has(i))) return;
+                    const seventh = intervalSet(intervals,[9,10,11]);
+                    if (!includeRoot && seventh.length && !seventh.some(i=>played.has(i))) return;
+                    voicings.push(current);
+                    return;
+                }
+                for (const candidate of candidatesByString[index]) {
+                    const frets = current.map(n=>n.fret).filter(f=>f>0);
+                    if (candidate.fret>0) frets.push(candidate.fret);
+                    if (frets.length && Math.max(...frets)-Math.min(...frets)>maxSpan) continue;
+                    build(index+1,[...current,candidate]);
+                }
+            };
+            build(0,[]);
+            return voicings.sort((a,b) => {
+                const score = notes => {
+                    const frets=notes.map(n=>n.fret).filter(Boolean);
+                    const span=frets.length?Math.max(...frets)-Math.min(...frets):0;
+                    const duplicates=notes.length-new Set(notes.map(n=>n.interval)).size;
+                    const open=notes.filter(n=>n.fret===0).length;
+                    return span*12 + duplicates*6 + open*1.5 + notes.reduce((sum,n)=>sum+n.fret,0)/notes.length;
                 };
-                build(0, []);
-            });
-            
-            voicings.sort((a, b) => {
-                const avgA = a.reduce((sum, v) => sum + v.fret, 0) / a.length;
-                const avgB = b.reduce((sum, v) => sum + v.fret, 0) / b.length;
-                return avgA - avgB;
-            });
-            return voicings;
+                return score(a)-score(b);
+            }).slice(0,48);
         };
 
         /* 指板板塊 - 精確對齊版 */
@@ -300,11 +318,104 @@
             };
         };
 
+        const ADDABLE_TONES = [
+            {interval:2, symbol:'9', zh:'2 / 9', en:'2 / 9'}, {interval:1, symbol:'b9', zh:'♭9', en:'b9'},
+            {interval:3, symbol:'#9', zh:'♯9', en:'#9'}, {interval:5, symbol:'11', zh:'4 / 11', en:'4 / 11'},
+            {interval:6, symbol:'#11', zh:'♯11', en:'#11'}, {interval:9, symbol:'13', zh:'6 / 13', en:'6 / 13'},
+            {interval:8, symbol:'b13', zh:'♭13', en:'b13'}
+        ];
+
+        const THEME_STORAGE_KEY = 'guitar-advisor-theme';
+        const UPDATE_NOTICE_STORAGE_KEY = 'guitar-advisor-update-notice-v1';
+        const THEME_OPTIONS = [
+            {id:'classic', zh:'經典風格', en:'Classic'},
+            {id:'dark-professional', zh:'深色專業', en:'Dark Professional'},
+            {id:'minimal-light', zh:'極簡淺色', en:'Minimal Light'},
+            {id:'vintage-jazz', zh:'爵士復古', en:'Vintage Jazz'},
+            {id:'tech-blue', zh:'科技藍', en:'Tech Blue'},
+            {id:'forest-green', zh:'森林綠', en:'Forest Green'}
+        ];
+
+        const readLocal = (key, fallback = null) => {
+            try { return localStorage.getItem(key) || fallback; } catch (_) { return fallback; }
+        };
+        const writeLocal = (key, value) => {
+            try { localStorage.setItem(key, value); } catch (_) {}
+        };
+
+        const UpdateNotice = ({ lang, closing, onDismiss }) => {
+            const items = lang === 'zh' ? [
+                '和弦分類已重新整理，名稱、音程與和聲功能更一致。',
+                '六和弦、七和弦與九和弦資料庫已擴充，並移除重複音組與不穩定命名。',
+                '主要選單已移除 add 類和弦；加音功能集中至和弦加音模擬器。',
+                '爵士色彩和弦分類已移除；Half-Diminished、Sus2 與 Sus4 均保留。',
+                '加入爵士無根音排列、六條琴弦自由選擇與可演奏性篩選。',
+                '友好模式、根音控制、指法排序、吉他／鋼琴試聽與基本樂理頁面均已優化。'
+            ] : [
+                'Chord categories have been reorganized for more consistent names, intervals, and harmonic roles.',
+                'Sixth, seventh, and ninth chord libraries were expanded while duplicate pitch sets and unstable labels were removed.',
+                'Add chords were removed from the main menu and are now handled by the Add-Note Simulator.',
+                'The Jazz Color Chords category was removed; Half-Diminished, Sus2, and Sus4 remain available.',
+                'Jazz rootless voicings, free six-string selection, and playability filtering are included.',
+                'Friendly mode, root control, voicing order, guitar/piano playback, and the music-theory page were refined.'
+            ];
+            return (
+                <div className={`update-notice ${closing ? 'closing' : ''}`} onClick={onDismiss}>
+                    <section className="update-notice-card" aria-modal="true" role="dialog" aria-labelledby="update-notice-title">
+                        <button type="button" className="update-notice-close" aria-label={lang==='zh'?'關閉公告':'Close notice'}>×</button>
+                        <div className="update-notice-eyebrow">Brian&amp;Code · 2026</div>
+                        <h2 id="update-notice-title">{lang==='zh'?'網站更新公告':'Website Update Notice'}</h2>
+                        <p>{lang==='zh'?'本次更新已完成。點擊畫面任意位置即可開始探索。':'This update is ready. Click anywhere to begin exploring.'}</p>
+                        <ul className="update-notice-list">{items.map(item=><li key={item}>{item}</li>)}</ul>
+                        <div className="update-notice-footer">
+                            <span>{lang==='zh'?'查看完整更新紀錄，請前往 Brian Code 官方網站。':'For the complete update record, visit the Brian Code official website.'}</span>
+                            <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'查看完整更新紀錄':'View full update record'}</a>
+                        </div>
+                    </section>
+                </div>
+            );
+        };
+
+        const addNoteChord = (base, addedIntervals) => {
+            const additions = addedIntervals.filter(i=>!base.intervals.includes(i));
+            const intervals = [...new Set([...base.intervals,...additions])];
+            const symbols = additions.map(i=>ADDABLE_TONES.find(t=>t.interval===i)?.symbol).filter(Boolean);
+            const joined = symbols.join('');
+            const has = i => intervals.includes(i);
+            let label = `${base.label}${symbols.map(s=>`+${s}`).join('')}`;
+            let zh = `${base.zh}加音`; let en = `${base.en} with added tone`;
+            if (base.id==='Maj' && symbols.length===1 && symbols[0]==='9') { label='add9'; zh='加九和弦'; en='Add 9 chord'; }
+            else if (base.id==='m' && symbols.length===1 && symbols[0]==='9') { label='m(add9)'; zh='小加九和弦'; en='Minor add 9'; }
+            else if (base.id==='Maj' && symbols.length===1 && symbols[0]==='11') { label='add11'; zh='加十一和弦'; en='Add 11 chord'; }
+            else if (base.id==='m' && symbols.length===1 && symbols[0]==='11') { label='m(add11)'; zh='小加十一和弦'; en='Minor add 11'; }
+            else if (base.id==='Maj' && symbols.length===1 && symbols[0]==='13') { label='6'; zh='大六和弦'; en='Major 6th'; }
+            else if (base.id==='m' && symbols.length===1 && symbols[0]==='13') { label='m6'; zh='小六和弦'; en='Minor 6th'; }
+            else if (base.id==='Maj' && has(2) && has(9)) { label='6/9'; zh='六九和弦'; en='Major 6/9'; }
+            else if (base.id==='m' && has(2) && has(9)) { label='m6/9'; zh='小六九和弦'; en='Minor 6/9'; }
+            else if (base.id==='Maj7' && symbols.length===1 && symbols[0]==='9') { label='maj9'; zh='大九和弦'; en='Major 9th'; }
+            else if (base.id==='Maj7' && symbols.length===1 && symbols[0]==='b9') { label='maj7(b9)'; zh='大七降九加音'; en='Major 7 with added flat 9'; }
+            else if (base.id==='Maj7' && symbols.length===1 && symbols[0]==='#9') { label='maj7(#9)'; zh='大七升九加音'; en='Major 7 with added sharp 9'; }
+            else if (base.id==='Maj7' && symbols.length===1 && symbols[0]==='#11') { label='maj7#11'; zh='大七升十一和弦'; en='Major 7 sharp 11'; }
+            else if (base.id==='Maj7' && symbols.length===1 && symbols[0]==='13') { label='maj13'; zh='大十三和弦'; en='Major 13th'; }
+            else if (base.id==='Maj7' && has(2) && has(6)) { label='maj9#11'; zh='大九升十一和弦'; en='Major 9 sharp 11'; }
+            else if (base.id==='m7' && symbols.length===1 && symbols[0]==='9') { label='m9'; zh='小九和弦'; en='Minor 9th'; }
+            else if (base.id==='m7' && symbols.length===1 && symbols[0]==='b9') { label='m7(b9)'; zh='小七降九加音'; en='Minor 7 with added flat 9'; }
+            else if (base.id==='m7' && symbols.length===1 && symbols[0]==='11') { label='m11'; zh='小十一和弦'; en='Minor 11th'; }
+            else if (base.id==='m7' && symbols.length===1 && symbols[0]==='13') { label='m13'; zh='小十三和弦'; en='Minor 13th'; }
+            else if (base.id==='7' && symbols.length===1 && symbols[0]==='9') { label='9'; zh='屬九和弦'; en='Dominant 9th'; }
+            else if (base.id==='7' && symbols.length===1 && symbols[0]==='11') { label='11'; zh='屬十一和弦'; en='Dominant 11th'; }
+            else if (base.id==='7' && symbols.length===1 && symbols[0]==='13') { label='13'; zh='屬十三和弦'; en='Dominant 13th'; }
+            else if (base.id==='7' && has(2) && has(6)) { label='9#11'; zh='屬九升十一和弦'; en='Dominant 9 sharp 11'; }
+            else if (base.id==='7' && has(2) && has(8)) { label='9b13'; zh='屬九降十三和弦'; en='Dominant 9 flat 13'; }
+            else if (base.id==='7' && symbols.length===1 && ['b9','#9','#11','b13'].includes(symbols[0])) { label=`7${symbols[0]}`; zh=`屬七${symbols[0]}和弦`; en=`Dominant 7 ${symbols[0]}`; }
+            return { id:'simulated', label, zh, en, formula:additions.length ? `${base.formula}-${symbols.join('-')}` : base.formula, intervals, additions, candidates: additions.length ? [`${base.label}${symbols.map(s=>`+${s}`).join('')}`] : [] };
+        };
+
         const DetailSheet = ({ root, typeObj, mode, onClose, t, lang }) => {
             const [disp, setDisp] = useState('note');
             const [vMode, setVMode] = useState('arpeggio');
-            const [sCount, setSCount] = useState(4);
-            const [sGroup, setSGroup] = useState('root6');
+            const [selectedStrings, setSelectedStrings] = useState([6,5,4,3]);
+            const [includeRoot, setIncludeRoot] = useState(true);
             const [vIndex, setVIndex] = useState(0);
             const [isFriendly, setIsFriendly] = useState(false);
             const [instrument, setInstrument] = useState('guitar');
@@ -312,7 +423,7 @@
             const { dots, availableVoicings } = useMemo(() => {
                 const rootPc = NOTES_C.indexOf(root);
                 if (mode === 'chord' && vMode === 'voicing') {
-                    const vs = generateVoicings(rootPc, typeObj, sCount, sGroup, isFriendly);
+                    const vs = generateVoicings(rootPc, typeObj, selectedStrings, includeRoot, isFriendly);
                     return { dots: vs[vIndex] || [], availableVoicings: vs.length };
                 }
 
@@ -326,7 +437,15 @@
                     }
                 }
                 return { dots: res, availableVoicings: 0 };
-            }, [root, typeObj, mode, vMode, sCount, sGroup, vIndex, isFriendly]);
+            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly]);
+
+            const toggleString = (string) => {
+                setSelectedStrings(previous => {
+                    const next = previous.includes(string) ? previous.filter(s=>s!==string) : [...previous,string];
+                    return next.sort((a,b)=>b-a);
+                });
+                setVIndex(0);
+            };
 
             return (
                 <div className="gallery-overlay animate-in">
@@ -342,6 +461,7 @@
                                 <div className="mt-4 flex flex-wrap gap-3 items-center">
                                     {mode === 'chord' && <span className="text-bronze font-mono text-lg">{root}{typeObj.label}</span>}
                                     <span className="text-[11px] text-zinc-500 font-mono tracking-widest">{typeObj.formula || typeObj.intervals.join('-')}</span>
+                                    {mode === 'chord' && vMode === 'voicing' && !includeRoot && <span className="rootless-badge">{lang==='zh'?'無根音排列':'Rootless voicing'}</span>}
                                 </div>
                             </div>
                             <div className="flex flex-col gap-4 items-end">
@@ -369,33 +489,23 @@
                         </div>
 
                         {mode === 'chord' && vMode === 'voicing' && (
-                            <div className="flex flex-col md:flex-row gap-6 mb-12 border-y border-white/5 py-6 items-center justify-between">
-                                <div className="flex gap-4 items-center">
-                                    <span className="text-[10px] text-zinc-500 uppercase tracking-widest">{lang==='zh'?'指型弦數':'Strings'}:</span>
-                                    {[3, 4].map(c => (
-                                        <button key={c} onClick={()=>{setSCount(c); setVIndex(0);}} className={`text-[11px] px-3 py-1 border transition-all ${sCount===c?'text-bronze border-bronze':'text-zinc-600 border-transparent hover:text-zinc-400'}`}>
-                                            {c} {lang==='zh'?'弦':'Str'}
-                                        </button>
-                                    ))}
-                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);}} className={`text-[11px] px-3 py-1 border transition-all ml-2 ${isFriendly?'text-bronze border-bronze bg-bronze/10':'text-zinc-600 border-zinc-800 hover:text-zinc-400'}`}>
-                                        {lang==='zh'?'友好模式':'Friendly'}
+                            <div className="voicing-controls mb-12">
+                                <div className="voicing-topline">
+                                    <div className="root-control">
+                                        <div><span>{lang==='zh'?'包含根音':'Include root'}</span><small>{includeRoot ? (lang==='zh'?'一般和弦排列':'Standard voicing') : (lang==='zh'?'由貝斯負責根音':'Bass-led rootless voicing')}</small></div>
+                                        <button role="switch" aria-checked={includeRoot} onClick={()=>{setIncludeRoot(v=>!v);setVIndex(0);}} className={`root-switch ${includeRoot?'on':''}`}><i></i></button>
+                                    </div>
+                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);}} className={`friendly-toggle ${isFriendly?'active':''}`}>
+                                        {lang==='zh'?'友好模式':'Friendly'} <small>{isFriendly ? (lang==='zh'?'窄跨度優先':'Narrow span') : (lang==='zh'?'進階排列':'Advanced')}</small>
                                     </button>
                                 </div>
-                                <div className="flex gap-4 overflow-x-auto no-scrollbar">
-                                    {(sCount === 3 ? [
-                                        {id:'root6', label: lang==='zh'?'第 6-5-4 弦':'Strings 6-5-4'},
-                                        {id:'root5', label: lang==='zh'?'第 5-4-3 弦':'Strings 5-4-3'},
-                                        {id:'mid', label: lang==='zh'?'第 4-3-2 弦':'Strings 4-3-2'},
-                                        {id:'high', label: lang==='zh'?'第 3-2-1 弦':'Strings 3-2-1'}
-                                    ] : [
-                                        {id:'root6', label: lang==='zh'?'根音在第6弦':'Root on 6th'},
-                                        {id:'root5', label: lang==='zh'?'根音在第5弦':'Root on 5th'},
-                                        {id:'mid', label: lang==='zh'?'根音在第4弦':'Root on 4th'}
-                                    ]).map(g => (
-                                        <button key={g.id} onClick={()=>{setSGroup(g.id); setVIndex(0);}} className={`whitespace-nowrap text-[11px] tracking-widest pb-1 border-b transition-all ${sGroup===g.id?'text-bronze border-bronze':'text-zinc-700 border-transparent hover:text-zinc-500'}`}>
-                                            {g.label}
-                                        </button>
-                                    ))}
+                                <div className="string-picker">
+                                    <div className="string-picker-head"><span>{lang==='zh'?'選擇琴弦':'Select strings'}</span><small>{lang==='zh'?'可任意多選；未選取琴弦不會出現在指法中':'Select any combination; unselected strings are excluded'}</small></div>
+                                    <div className="string-picker-lines">
+                                        {[6,5,4,3,2,1].map(string => <button key={string} onClick={()=>toggleString(string)} className={`string-choice ${selectedStrings.includes(string)?'selected':''}`}>
+                                            <b>{string}</b><span>{['E','A','D','G','B','E'][6-string]}</span><i></i>
+                                        </button>)}
+                                    </div>
                                 </div>
                                 {availableVoicings > 0 ? (
                                     <div className="flex items-center gap-4 text-[11px] tracking-widest text-zinc-400">
@@ -404,7 +514,7 @@
                                         <button onClick={()=>setVIndex(v => Math.min(availableVoicings-1, v+1))} disabled={vIndex===availableVoicings-1} className="hover:text-white disabled:opacity-30">&rarr;</button>
                                     </div>
                                 ) : (
-                                    <div className="text-[11px] tracking-widest text-red-400">{lang==='zh'?'無適合按法':'No Voicing Found'}</div>
+                                    <div className="text-[11px] tracking-widest text-red-400">{selectedStrings.length < 2 ? (lang==='zh'?'請至少選擇兩條琴弦':'Select at least two strings') : (lang==='zh'?'沒有符合根音、琴弦與可演奏性條件的指法':'No playable voicing matches the root, strings, and playability settings')}</div>
                                 )}
                             </div>
                         )}
@@ -422,10 +532,17 @@
             const [typeObj, setTypeObj] = useState(null);
             const [detail, setDetail] = useState(null);
             const [lang, setLang] = useState('zh');
-            const [isLight, setIsLight] = useState(false);
+            const [theme, setTheme] = useState(() => {
+                const saved = readLocal(THEME_STORAGE_KEY, 'classic');
+                return THEME_OPTIONS.some(option=>option.id===saved) ? saved : 'classic';
+            });
+            const [stylePanelOpen, setStylePanelOpen] = useState(false);
+            const [showUpdateNotice, setShowUpdateNotice] = useState(() => readLocal(UPDATE_NOTICE_STORAGE_KEY) !== 'read');
+            const [closingUpdateNotice, setClosingUpdateNotice] = useState(false);
             const [libraryQuery, setLibraryQuery] = useState('');
-            const [builderInput, setBuilderInput] = useState('Cmaj7+9');
-            const [builderError, setBuilderError] = useState('');
+            const [simRoot, setSimRoot] = useState('C');
+            const [simBaseId, setSimBaseId] = useState('Maj7');
+            const [simAdditions, setSimAdditions] = useState([]);
 
             useEffect(() => {
                 const TEXT = {
@@ -437,9 +554,9 @@
                         note: "音名", degree: "度數", copy: "複製座標", copied: "已複製！",
                         topStr: "上方為第 1 弦 (高音)", dispNote: "顯示音名", dispDeg: "顯示度數", play: "播放試聽",
                         cat: {
-                           triads: "三和弦系列", sixths: "六和弦系列", sevenths: "七和弦系列", dom_plus: "進階屬七和弦",
+                           triads: "三和弦系列", sixths: "六和弦系列", sevenths: "七和弦系列", dom_plus: "變化與掛留屬和弦",
                            ninths: "九和弦系列", elevenths: "十一和弦系列", thirteenths: "十三和弦系列", tenths: "第十音系列",
-                           added: "加音和弦系列", no35: "省略音和弦", special: "特殊風格系列", jazz_color: "爵士色彩和弦",
+                           no35: "省略音和弦", special: "特殊風格系列",
                            basic: "基礎與五聲音階", modes: "自然調式系列", jazz: "爵士與旋律小調",
                            sym: "對稱音階系列", exotic: "異國風情系列"
                         }
@@ -452,9 +569,9 @@
                         note: "Note", degree: "Degree", copy: "Copy", copied: "Copied!",
                         topStr: "Top is 1st String", dispNote: "Show Notes", dispDeg: "Show Degrees", play: "Play",
                         cat: {
-                           triads: "Triads", sixths: "Sixths", sevenths: "Sevenths", dom_plus: "Dom. Altered",
+                           triads: "Triads", sixths: "Sixth Chords", sevenths: "Sevenths", dom_plus: "Altered & Suspended Dominants",
                            ninths: "Ninths", elevenths: "Elevenths", thirteenths: "Thirteenths", tenths: "Tenths",
-                           added: "Add Chords", no35: "No 3/5", special: "Special Styles", jazz_color: "Jazz Color Chords",
+                           no35: "No 3/5", special: "Special Styles",
                            basic: "Core & Pentatonic Scales", modes: "Church Modes", jazz: "Jazz & Melodic Minor Modes",
                            sym: "Symmetric", exotic: "Exotic"
                         }
@@ -470,6 +587,7 @@
                     mk("5","5","強力和弦（五度）","Power chord","1-5",[0,7]),
                     mk("6","6","大六和弦","Major 6th","1-3-5-6",[0,4,7,9]), mk("m6","m6","小六和弦","Minor 6th","1-b3-5-6",[0,3,7,9]),
                     mk("69","6/9","六九和弦","Major 6/9","1-3-5-6-9",[0,4,7,9,2]), mk("m69","m6/9","小六九和弦","Minor 6/9","1-b3-5-6-9",[0,3,7,9,2]),
+                    mk("69#11","6/9#11","六九升十一和弦","Major 6/9 sharp 11","1-3-5-6-9-#11",[0,4,7,9,2,6]),
                     mk("Maj7","maj7","大七和弦","Major 7th","1-3-5-7",[0,4,7,11]), mk("7","7","屬七和弦","Dominant 7th","1-3-5-b7",[0,4,7,10]),
                     mk("m7","m7","小七和弦","Minor 7th","1-b3-5-b7",[0,3,7,10]), mk("mMaj7","m(maj7)","小大七和弦","Minor-major 7th","1-b3-5-7",[0,3,7,11]),
                     mk("m7b5","m7b5","半減七和弦","Half-diminished 7th","1-b3-b5-b7",[0,3,6,10]), mk("dim7","dim7","減七和弦","Diminished 7th","1-b3-b5-bb7",[0,3,6,9]),
@@ -477,12 +595,8 @@
                     mk("7sus4","7sus4","屬七掛四和弦","Dominant 7sus4","1-4-5-b7",[0,5,7,10]), mk("9","9","屬九和弦","Dominant 9th","1-3-5-b7-9",[0,4,7,10,2]),
                     mk("Maj9","maj9","大九和弦","Major 9th","1-3-5-7-9",[0,4,7,11,2]), mk("m9","m9","小九和弦","Minor 9th","1-b3-5-b7-9",[0,3,7,10,2]),
                     mk("11","11","屬十一和弦","Dominant 11th","1-3-5-b7-9-11",[0,4,7,10,2,5]), mk("13","13","屬十三和弦","Dominant 13th","1-3-5-b7-9-13",[0,4,7,10,2,9]),
-                    mk("add9","add9","加九和弦","Add 9 chord","1-3-5-9",[0,4,7,2]), mk("madd9","m(add9)","小加九和弦","Minor add 9","1-b3-5-9",[0,3,7,2]),
-                    mk("add11","add11","加十一和弦","Add 11 chord","1-3-5-11",[0,4,7,5]), mk("madd11","m(add11)","小加十一和弦","Minor add 11","1-b3-5-11",[0,3,7,5]),
-                    mk("add13","add13","加十三和弦","Add 13 chord","1-3-5-13",[0,4,7,9]), mk("madd13","m(add13)","小加十三和弦","Minor add 13","1-b3-5-13",[0,3,7,9]),
                     mk("sus2sus4","sus2/4","雙掛留和弦","Double suspended chord","1-2-4-5",[0,2,5,7]),
                     mk("Maj7#11","maj7#11","大七升十一和弦","Major 7 sharp 11","1-3-5-7-#11",[0,4,7,11,6]), mk("m11","m11","小十一和弦","Minor 11th","1-b3-5-b7-9-11",[0,3,7,10,2,5]),
-                    mk("Maj7#9","maj7#9","大七升九和弦","Major 7 sharp 9","1-3-5-7-#9",[0,4,7,11,3]), mk("Maj7b9","maj7b9","大七降九和弦","Major 7 flat 9","1-3-5-7-b9",[0,4,7,11,1]),
                     mk("Maj9#11","maj9#11","大九升十一和弦","Major 9 sharp 11","1-3-5-7-9-#11",[0,4,7,11,2,6]), mk("Maj9#5","maj9#5","大九升五和弦","Major 9 sharp 5","1-3-#5-7-9",[0,4,8,11,2]),
                     mk("Maj7#5","maj7#5","大七升五和弦","Major 7 sharp 5","1-3-#5-7",[0,4,8,11]), mk("mMaj9","m(maj9)","小大九和弦","Minor-major 9th","1-b3-5-7-9",[0,3,7,11,2]),
                     mk("mMaj11","m(maj11)","小大十一和弦","Minor-major 11th","1-b3-5-7-9-11",[0,3,7,11,2,5]), mk("mMaj13","m(maj13)","小大十三和弦","Minor-major 13th","1-b3-5-7-9-11-13",[0,3,7,11,2,5,9]),
@@ -492,23 +606,22 @@
                     mk("7#11","7#11","屬七升十一和弦","Dominant 7 sharp 11","1-3-5-b7-#11",[0,4,7,10,6]), mk("7b5","7b5","屬七降五和弦","Dominant 7 flat 5","1-3-b5-b7",[0,4,6,10]),
                     mk("9#11","9#11","屬九升十一和弦","Dominant 9 sharp 11","1-3-5-b7-9-#11",[0,4,7,10,2,6]), mk("13#11","13#11","屬十三升十一和弦","Dominant 13 sharp 11","1-3-5-b7-9-#11-13",[0,4,7,10,2,6,9]),
                     mk("7b9#11","7b9#11","屬七降九升十一和弦","Dominant 7 flat 9 sharp 11","1-3-5-b7-b9-#11",[0,4,7,10,1,6]), mk("7#9b13","7#9b13","屬七升九降十三和弦","Dominant 7 sharp 9 flat 13","1-3-5-b7-#9-b13",[0,4,7,10,3,8]),
-                    mk("7b9b13","7b9b13","屬七降九降十三和弦","Dominant 7 flat 9 flat 13","1-3-5-b7-b9-b13",[0,4,7,10,1,8]), mk("m7b9","m7b9","小七降九和弦","Minor 7 flat 9","1-b3-5-b7-b9",[0,3,7,10,1]),
+                    mk("7b9b13","7b9b13","屬七降九降十三和弦","Dominant 7 flat 9 flat 13","1-3-5-b7-b9-b13",[0,4,7,10,1,8]),
                     mk("quartal","quartal","四度堆疊和弦","Quartal chord","1-4-b7-b3",[0,5,10,3]), mk("soWhat","So What","So What 和弦","So What chord","1-4-b7-b3-5",[0,5,10,3,7]),
                     mk("Maj13","maj13","大十三和弦","Major 13th","1-3-5-7-9-13",[0,4,7,11,2,9]), mk("m13","m13","小十三和弦","Minor 13th","1-b3-5-b7-9-13",[0,3,7,10,2,9]),
-                    mk("m9b5","m9b5","半減九和弦","Half-diminished 9th","1-b3-b5-b7-9",[0,3,6,10,2]), mk("dimMaj7","dim(maj7)","減大七和弦","Diminished-major 7th","1-b3-b5-7",[0,3,6,11])
+                    mk("m9b5","m9b5","半減九和弦","Half-diminished 9th","1-b3-b5-b7-9",[0,3,6,10,2]), mk("9b13","9b13","屬九降十三和弦","Dominant 9 flat 13","1-3-5-b7-9-b13",[0,4,7,10,2,8]),
+                    mk("dimMaj7","dim(maj7)","減大七和弦","Diminished-major 7th","1-b3-b5-7",[0,3,6,11])
                 ];
 
                 const CHORD_CATEGORIES = [
                     {id:"triads", key:"triads", list:["Maj","m","dim","aug","sus2","sus4","5"]},
-                    {id:"sixths", key:"sixths", list:["6","m6","69","m69"]},
-                    {id:"sevenths", key:"sevenths", list:["Maj7","7","m7","mMaj7","m7b5","dim7","aug7","Maj7#11","dimMaj7"]},
-                    {id:"dom_plus", key:"dom_plus", list:["7alt","7sus4","9sus4","13sus4","7b9","7#9","7b13","7#11","7b5"]},
-                    {id:"ninths", key:"ninths", list:["9","Maj9","m9","m9b5"]},
-                    {id:"elevenths", key:"elevenths", list:["11","m11"]},
-                    {id:"thirteenths", key:"thirteenths", list:["13","Maj13","m13","13b9"]},
-                    {id:"added", key:"added", list:["add9","madd9","add11","madd11","add13","madd13"]},
-                    {id:"special", key:"special", list:["sus2sus4"]},
-                    {id:"jazz_color", key:"jazz_color", list:["Maj7#9","Maj7b9","Maj9#11","Maj9#5","Maj7#5","mMaj9","mMaj11","mMaj13","9#11","13#11","7b9#11","7#9b13","7b9b13","m7b9","quartal","soWhat"]}
+                    {id:"sixths", key:"sixths", list:["6","m6","69","m69","69#11"]},
+                    {id:"sevenths", key:"sevenths", list:["Maj7","7","m7","mMaj7","m7b5","dim7","aug7","Maj7#5","dimMaj7"]},
+                    {id:"dom_plus", key:"dom_plus", list:["7alt","7sus4","7b9","7#9","7b13","7#11","7b5","7b9#11","7#9b13","7b9b13"]},
+                    {id:"ninths", key:"ninths", list:["9","Maj9","m9","mMaj9","m9b5","9sus4","9#11","9b13","Maj9#11","Maj9#5"]},
+                    {id:"elevenths", key:"elevenths", list:["11","m11","mMaj11","Maj7#11"]},
+                    {id:"thirteenths", key:"thirteenths", list:["13","Maj13","m13","mMaj13","13sus4","13b9","13#11"]},
+                    {id:"special", key:"special", list:["sus2sus4","quartal","soWhat"]}
                 ];
 
                 const SCALES = [
@@ -553,9 +666,9 @@
             }, []);
 
             useEffect(() => {
-                if (isLight) document.body.classList.add('light-mode');
-                else document.body.classList.remove('light-mode');
-            }, [isLight]);
+                document.documentElement.dataset.theme = theme;
+                writeLocal(THEME_STORAGE_KEY, theme);
+            }, [theme]);
 
             useEffect(() => {
                 document.documentElement.lang = lang === 'zh' ? 'zh-Hant' : 'en';
@@ -565,15 +678,22 @@
             if (!db) return <div className="h-screen flex items-center justify-center text-bronze tracking-[0.5em] text-[11px]">LOADING...</div>;
             const t = db.c.TEXT[lang] || db.c.TEXT['zh'];
 
-            const openBuiltChord = (value = builderInput) => {
-                const parsed = parseCustomChord(value);
-                if (!parsed) {
-                    setBuilderError(lang==='zh'?'無法辨識。請輸入例如 Cmaj7+9、Cm7+11 或 C7+b9+13。':'Not recognized. Try Cmaj7+9, Cm7+11, or C7+b9+13.');
-                    return;
-                }
-                setBuilderInput(value);
-                setBuilderError('');
-                setDetail(parsed);
+            const simulatorBase = db.ch.CHORD_TYPES.find(item=>item.id===simBaseId) || db.ch.CHORD_TYPES[0];
+            const simulatedChord = addNoteChord(simulatorBase, simAdditions);
+            const openSimulatedChord = () => setDetail({root:simRoot, typeObj:simulatedChord, mode:'chord'});
+            const selectTheme = (nextTheme) => {
+                setTheme(nextTheme);
+                setStylePanelOpen(false);
+            };
+            const dismissUpdateNotice = () => {
+                if (closingUpdateNotice) return;
+                writeLocal(UPDATE_NOTICE_STORAGE_KEY, 'read');
+                setClosingUpdateNotice(true);
+                window.setTimeout(() => setShowUpdateNotice(false), 180);
+            };
+            const toggleAddition = (interval) => {
+                if (simulatorBase.intervals.includes(interval)) return;
+                setSimAdditions(current => current.includes(interval) ? current.filter(i=>i!==interval) : current.length < 2 ? [...current,interval] : [...current.slice(1),interval]);
             };
 
             const renderMain = () => {
@@ -582,14 +702,14 @@
                         {no:'01',title:'指板上的音程',body:'把根音當作 1。往高一格是小二度，兩格是大二度，三格是小三度，四格是大三度，七格是完全五度。相同形狀移到不同根音，音程關係不變。',tip:'先記住第 6、5 弦根音，再用形狀定位其他音。'},
                         {no:'02',title:'三和弦如何形成',body:'從音階隔一個音堆疊：1–3–5 是大三和弦；1–b3–5 是小三和弦；1–b3–b5 是減三和弦；1–3–#5 是增三和弦。',tip:'練習只彈三條弦的封閉三和弦，能更快看懂和聲。'},
                         {no:'03',title:'七和弦與功能',body:'在三和弦上再疊一個七度。maj7 聲音穩定；m7 常作小調或 ii 級；7 含三全音，通常推向主和弦；m7b5 常出現在小調 ii–V–i。',tip:'先練 Dm7–G7–Cmaj7，再移調到十二個調。'},
-                        {no:'04',title:'9、11、13 延伸音',body:'延伸音就是跨過八度的 2、4、6。9 等於 2，11 等於 4，13 等於 6。爵士吉他不必把所有音都按出來，通常保留 3、7 與重要色彩音。',tip:'根音可交給貝斯；五度通常最先省略。'},
+                        {no:'04',title:'延伸和弦與加音不同',body:'9、11、13 是跨過八度的 2、4、6；在常用和弦符號中，它們通常延續七和弦的結構。add9、add11 則是在三和弦上額外加入音，並不暗示七度；6/9 也含六度與九度、但不含七度。爵士吉他不必把所有音都按出來，通常保留 3、7 與重要色彩音。',tip:'根音可交給貝斯；五度通常最先省略。'},
                         {no:'05',title:'調內和弦',body:'大調七級和弦依序是 Imaj7、IIm7、IIIm7、IVmaj7、V7、VIm7、VIIm7b5。理解級數後，可以用同一組關係在任何把位與調性中移動。',tip:'用 C 大調先找出 Cmaj7、Dm7、Em7、Fmaj7、G7、Am7、Bm7b5。'},
                         {no:'06',title:'爵士吉他的 Voice Leading',body:'換和弦時，讓共同音留在原位，其餘聲部移到最近的和弦音。好的連接通常比使用更多音更重要。',tip:'只彈每個和弦的 3 與 7，觀察它們在 ii–V–I 中如何半音移動。'}
                     ] : [
                         {no:'01',title:'Intervals on the fretboard',body:'Treat the root as 1. One fret is a minor 2nd, two frets a major 2nd, three a minor 3rd, four a major 3rd, and seven a perfect 5th. Shapes preserve their interval relationships when moved.',tip:'Learn roots on strings 6 and 5 first, then locate the remaining notes from those anchors.'},
                         {no:'02',title:'Building triads',body:'Stack alternate scale tones. 1–3–5 makes a major triad; 1–b3–5 minor; 1–b3–b5 diminished; and 1–3–#5 augmented.',tip:'Practice closed triads on three strings to see harmony more clearly.'},
                         {no:'03',title:'Seventh chords and function',body:'Add a seventh above a triad. maj7 is stable; m7 often serves as ii; dominant 7 contains a tritone and resolves strongly; m7b5 commonly begins a minor ii–V–i.',tip:'Start with Dm7–G7–Cmaj7, then move it through all twelve keys.'},
-                        {no:'04',title:'Extensions: 9, 11, and 13',body:'Extensions are 2, 4, and 6 placed above the octave. On guitar, you rarely need every chord tone. Keep the 3rd, 7th, and defining color tones.',tip:'The bass can cover the root; the 5th is usually the first note to omit.'},
+                        {no:'04',title:'Extensions are not add chords',body:'9, 11, and 13 are 2, 4, and 6 placed above the octave; in standard chord symbols they normally continue a seventh-chord structure. add9 and add11 add a tone to a triad without implying a seventh, while 6/9 contains 6 and 9 but no seventh. On guitar, you rarely need every tone: keep the 3rd, 7th, and defining colors.',tip:'The bass can cover the root; the 5th is usually the first note to omit.'},
                         {no:'05',title:'Diatonic chords',body:'Major-key seventh chords are Imaj7, IIm7, IIIm7, IVmaj7, V7, VIm7, and VIIm7b5. These relationships transpose to every key and position.',tip:'Map Cmaj7, Dm7, Em7, Fmaj7, G7, Am7, and Bm7b5 in one fretboard area.'},
                         {no:'06',title:'Voice leading for jazz guitar',body:'Keep common tones in place and move each remaining voice to the nearest chord tone. Smooth motion matters more than adding more notes.',tip:'Play only the 3rds and 7ths through a ii–V–I and watch the half-step movement.'}
                     ];
@@ -608,27 +728,24 @@
                     );
                 }
                 if (mode === 'builder') {
-                    const examples = ['Cmaj7+9','Cm7+11','C7+b9+13','Fmaj7+#11','G7+#9','Bm7b5+11'];
-                    const preview = parseCustomChord(builderInput);
+                    const baseChoices = ['Maj','m','7','Maj7','m7','m7b5','dim7','6','m6','69','sus2','sus4','7sus4'];
                     return (
                         <section className="chord-lab max-w-5xl mx-auto mt-16 animate-in">
-                            <div className="lab-kicker">{lang==='zh'?'自訂和弦':'CUSTOM CHORD'}</div>
-                            <h2>{lang==='zh'?'輸入和弦，立即查看指板':'Enter a chord and view it on the fretboard'}</h2>
-                            <p>{lang==='zh'?'支援根音、和弦性質與 +9、+11、+13 等延伸音。':'Supports roots, chord qualities, and extensions such as +9, +11, and +13.'}</p>
-                            <div className="chord-command">
-                                <input value={builderInput} onChange={e=>{setBuilderInput(e.target.value);setBuilderError('');}} onKeyDown={e=>e.key==='Enter'&&openBuiltChord()} aria-label={lang==='zh'?'輸入和弦':'Enter chord'} placeholder="Cmaj7+9" />
-                                <button onClick={()=>openBuiltChord()}>{lang==='zh'?'顯示和弦':'Show chord'}</button>
+                            <div className="lab-kicker">{lang==='zh'?'和弦加音模擬器':'CHORD ADD-NOTE SIMULATOR'}</div>
+                            <h2>{lang==='zh'?'以既有和弦為基礎，加入一或兩個音':'Start with a chord, then add one or two notes'}</h2>
+                            <p>{lang==='zh'?'系統會先辨識原和弦，再依新增音給出常用名稱、實際音組與可演奏指法。':'The system identifies the base chord first, then names the result and finds playable guitar voicings.'}</p>
+                            <div className="simulator-grid">
+                                <div className="sim-step"><span>01</span><label>{lang==='zh'?'選擇根音':'Choose root'}</label><div className="root-pills">{NOTES_C.map(note=><button key={note} onClick={()=>setSimRoot(note)} className={simRoot===note?'selected':''}>{note}</button>)}</div></div>
+                                <div className="sim-step"><span>02</span><label>{lang==='zh'?'選擇基礎和弦':'Choose base chord'}</label><select value={simBaseId} onChange={e=>{setSimBaseId(e.target.value);setSimAdditions([]);}}>{baseChoices.map(id=>{const item=db.ch.CHORD_TYPES.find(ch=>ch.id===id); return <option key={id} value={id}>{simRoot}{item.label || 'Major'} — {lang==='zh'?item.zh:item.en}</option>})}</select></div>
+                                <div className="sim-step"><span>03</span><label>{lang==='zh'?'加入一或兩個音':'Add one or two notes'}</label><div className="add-tone-pills">{ADDABLE_TONES.map(tone=>{const exists=simulatorBase.intervals.includes(tone.interval); const selected=simAdditions.includes(tone.interval); return <button key={tone.symbol} disabled={exists} onClick={()=>toggleAddition(tone.interval)} className={selected?'selected':''}>{tone.symbol}<small>{exists ? (lang==='zh'?'已包含':'included') : (lang==='zh'?tone.zh:tone.en)}</small></button>})}</div></div>
                             </div>
                             <div className="builder-preview">
-                                <span>{lang==='zh'?'解析結果':'Result'}</span>
-                                <strong>{preview ? `${preview.root}${preview.typeObj.label}` : '—'}</strong>
-                                <code>{preview?.typeObj.formula || '—'}</code>
+                                <span>{lang==='zh'?'分析結果':'Analysis'}</span>
+                                <strong>{simRoot}{simulatedChord.label}</strong>
+                                <code>{simulatedChord.formula}</code>
+                                <button onClick={openSimulatedChord}>{lang==='zh'?'查看指法':'View voicings'}</button>
                             </div>
-                            {builderError && <div className="builder-error">{builderError}</div>}
-                            <div className="example-row">
-                                <span>{lang==='zh'?'範例':'Examples'}</span>
-                                {examples.map(x=><button key={x} onClick={()=>openBuiltChord(x)}>{x}</button>)}
-                            </div>
+                            <div className="sim-note-summary"><b>{lang==='zh'?'新增音':'Added notes'}</b>{simulatedChord.additions.length ? simulatedChord.additions.map(i=>DEG_L[i]).join(' · ') : (lang==='zh'?'尚未加入新音':'No notes added yet')}<small>{simulatedChord.candidates.length ? `${lang==='zh'?'候選命名':'Candidate name'}: ${simRoot}${simulatedChord.candidates[0]}` : ''}</small></div>
                             <div className="extension-grid">
                                 {[
                                     ['+9',lang==='zh'?'加入九度音':'Add the 9th'],
@@ -719,9 +836,19 @@
                         <button className={`utility-btn ${lang==='zh'?'active':''}`} onClick={()=>setLang('zh')}>ZH</button>
                         <button className={`utility-btn ${lang==='en'?'active':''}`} onClick={()=>setLang('en')}>EN</button>
                         <div className="w-4"></div>
-                        <button className="utility-btn" onClick={()=>setIsLight(!isLight)}>
-                            {isLight ? 'DARK' : 'LIGHT'}
-                        </button>
+                        <div className="style-menu">
+                            <button type="button" className="utility-btn style-trigger" onClick={()=>setStylePanelOpen(open=>!open)} aria-expanded={stylePanelOpen} aria-haspopup="menu">
+                                {lang==='zh'?'更改風格':'Change style'}
+                            </button>
+                            {stylePanelOpen && <div className="style-panel" role="menu" aria-label={lang==='zh'?'網站風格':'Website styles'}>
+                                <div className="style-panel-head">{lang==='zh'?'選擇網站風格':'Choose a website style'}</div>
+                                <div className="style-options">
+                                    {THEME_OPTIONS.map(option=><button type="button" role="menuitemradio" aria-checked={theme===option.id} key={option.id} onClick={()=>selectTheme(option.id)} className={`style-option ${theme===option.id?'active':''}`}>
+                                        <i className={`style-swatch ${option.id}`}></i>{lang==='zh'?option.zh:option.en}
+                                    </button>)}
+                                </div>
+                            </div>}
+                        </div>
                     </div>
                     <header className="gallery-header animate-in">
                         <h1 className="gallery-title">{t.title}</h1>
@@ -729,12 +856,13 @@
                         <div className="mt-16 flex justify-center gap-16">
                             <button onClick={()=>{setMode('chord'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='chord'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{t.chord}</button>
                             <button onClick={()=>{setMode('scale'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='scale'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{t.scale}</button>
-                            <button onClick={()=>{setMode('builder'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='builder'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'和弦組合器':'Chord Builder'}</button>
+                            <button onClick={()=>{setMode('builder'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='builder'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'和弦加音模擬器':'Add-Note Simulator'}</button>
                             <button onClick={()=>{setMode('theory'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='theory'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'基本樂理':'Music Theory'}</button>
                         </div>
                     </header>
                     <main>{renderMain()}</main>
                     {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} />}
+                    {showUpdateNotice && <UpdateNotice lang={lang} closing={closingUpdateNotice} onDismiss={dismissUpdateNotice} />}
                     <footer className="text-center py-10 mt-20 border-t border-white/5">
                         <p className="text-[10px] text-zinc-600 tracking-[0.25em] uppercase">
                             © 2026 Brian&amp;Code. All Rights Reserved.
