@@ -44,7 +44,7 @@
       }
     </script>
     <script type="text/babel" data-presets="react-classic,env">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         /* 音訊引擎 */
         const MIDI_OPEN = {6:40, 5:45, 4:50, 3:55, 2:59, 1:64};
@@ -336,12 +336,113 @@
             {id:'forest-green', zh:'森林綠', en:'Forest Green'}
         ];
 
+        // Prepared release metadata. It remains a draft and is intentionally not auto-shown
+        // until the owner approves an official release.
+        const RELEASE_DIGEST = {
+            siteId:'guitar-advisor', siteName:'吉他顧問', version:'1.1.0', releasedAt:null, status:'draft',
+            summary:'收藏、瀏覽、比較、練習與轉調功能的向下相容擴充。',
+            highlights:['收藏和弦與最近瀏覽','指法比較與轉調對照','互動聽辨與本機練習紀錄'],
+            improvements:['既有和弦資料與指法生成共用於新增工具'], fixes:[],
+            officialReleaseUrl:'https://brian53013new.github.io/Brian-Code-Official-website/'
+        };
+
         const readLocal = (key, fallback = null) => {
             try { return localStorage.getItem(key) || fallback; } catch (_) { return fallback; }
         };
         const writeLocal = (key, value) => {
             try { localStorage.setItem(key, value); } catch (_) {}
         };
+
+        const FAVORITES_STORAGE_KEY = 'guitar-advisor-favorites-v1';
+        const RECENTS_STORAGE_KEY = 'guitar-advisor-recents-v1';
+        const PRACTICE_STORAGE_KEY = 'guitar-advisor-practice-v1';
+        const MAX_RECENTS = 24;
+        const readJson = (key, fallback) => {
+            try { const parsed = JSON.parse(localStorage.getItem(key) || ''); return parsed ?? fallback; } catch (_) { return fallback; }
+        };
+        const formatViewedAt = (value, lang) => {
+            if (!value) return '';
+            const diff = Math.max(0, Date.now() - new Date(value).getTime());
+            const minutes = Math.floor(diff / 60000);
+            if (minutes < 1) return lang==='zh' ? '剛剛' : 'Just now';
+            if (minutes < 60) return lang==='zh' ? `${minutes} 分鐘前` : `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return lang==='zh' ? `${hours} 小時前` : `${hours}h ago`;
+            return new Date(value).toLocaleDateString(lang==='zh'?'zh-TW':'en-US');
+        };
+        const voicingKey = (root, typeId, dots, capo = 0) => `${root}|${typeId}|${capo}|${[...dots].sort((a,b)=>b.string-a.string).map(n=>`${n.string}:${n.fret}`).join(',')}`;
+        const voicingPosition = dots => {
+            const frets = dots.map(n=>n.fret).filter(f=>f>0);
+            return frets.length ? Math.min(...frets) : 0;
+        };
+        const analyzeVoicing = dots => {
+            const activeStrings = [...new Set(dots.map(n=>n.string))].sort((a,b)=>b-a);
+            const frets = dots.map(n=>n.fret).filter(f=>f>0);
+            const span = frets.length ? Math.max(...frets) - Math.min(...frets) : 0;
+            const atFret = frets.reduce((map,f)=>({ ...map, [f]:(map[f]||0)+1 }),{});
+            const barreFret = Object.entries(atFret).map(([f,count])=>({f:Number(f),count})).find(item=>item.count>=2);
+            const score = span + (barreFret ? 2 : 0) + (activeStrings.length>=5 ? 1 : 0);
+            const difficulty = score <= 2 ? 'Easy' : score <= 5 ? 'Medium' : 'Advanced';
+            return {
+                activeStrings, mutedStrings:[6,5,4,3,2,1].filter(s=>!activeStrings.includes(s)), span,
+                openCount:dots.filter(n=>n.fret===0).length, barreFret:barreFret?.f || null, difficulty,
+                guide:barreFret ? `Index barre suggested at fret ${barreFret.f}` : 'One finger per distinct fretted position'
+            };
+        };
+        const buildVoicingRecord = (root, typeObj, dots, capo = 0) => {
+            const analysis = analyzeVoicing(dots);
+            return {
+                key:voicingKey(root,typeObj.id,dots,capo), root, typeId:typeObj.id, label:typeObj.label || '',
+                zh:typeObj.zh, en:typeObj.en, formula:typeObj.formula, intervals:typeObj.intervals, dots,
+                position:voicingPosition(dots), capo, analysis, viewedAt:new Date().toISOString(), savedAt:new Date().toISOString()
+            };
+        };
+        const VoicingThumbnail = ({ item, dots: passedDots, compact = false }) => {
+            const dots = passedDots || item?.dots || [];
+            return <div className={`voicing-thumbnail ${compact?'compact':''}`} aria-label={`${item?.root || ''}${item?.label || ''} voicing`}>
+                {[6,5,4,3,2,1].map(string=>{
+                    const note=dots.find(n=>n.string===string);
+                return <div className="voicing-thumb-string" key={string}><b>{string}</b><span>{note ? `${note.note} · ${note.fret===0?'O':note.fret}` : '×'}</span></div>;
+                })}
+            </div>;
+        };
+        const midiForPitchClass = (pc, octave = 4) => 12 * (octave + 1) + pc;
+        const playMidiTones = (midis, instrument = 'piano', simultaneous = false) => {
+            const ctx = getAudioContext();
+            const now = ctx.currentTime;
+            midis.forEach((midi,index)=>{
+                const frequency = 440 * Math.pow(2,(midi-69)/12);
+                const start = now + (simultaneous ? 0 : index * .52);
+                if (instrument === 'guitar') pluckGuitar(ctx,frequency,start,.64);
+                else strikePiano(ctx,frequency,start,.62);
+            });
+        };
+        const playChordIntervals = (rootPc, intervals, instrument = 'piano') => {
+            const midis = [...new Set(intervals)].sort((a,b)=>a-b).map(interval=>midiForPitchClass((rootPc+interval)%12, interval>=9 ? 5 : 4));
+            playMidiTones(midis,instrument,true);
+        };
+        const estimatePitch = (samples, sampleRate) => {
+            let rms = 0; for (let i=0;i<samples.length;i++) rms += samples[i]*samples[i];
+            if (Math.sqrt(rms/samples.length) < .012) return null;
+            const minLag=Math.floor(sampleRate/1000), maxLag=Math.floor(sampleRate/70); let bestLag=0,best=-1;
+            for(let lag=minLag;lag<Math.min(maxLag,samples.length/2);lag++) { let sum=0; for(let i=0;i<samples.length-lag;i++) sum+=samples[i]*samples[i+lag]; if(sum>best){best=sum;bestLag=lag;} }
+            return bestLag ? sampleRate/bestLag : null;
+        };
+        const NOTE_FLATS = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+        const parseChordSymbol = (symbol, chordTypes) => {
+            const match = symbol.trim().match(/^([A-Ga-g])([#b]?)(.*)$/);
+            if (!match) return null;
+            const rootName = `${match[1].toUpperCase()}${match[2]}`;
+            const aliases = {Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#',Cb:'B',Fb:'E','E#':'F','B#':'C'};
+            const canonical = aliases[rootName] || rootName;
+            const rootPc = NOTES_C.indexOf(canonical);
+            if (rootPc < 0) return null;
+            const suffix = match[3] || '';
+            const normalized = suffix.replace(/[Δ]/g,'maj').toLowerCase();
+            const type = chordTypes.find(item=>item.label.toLowerCase()===normalized) || (normalized==='' ? chordTypes.find(item=>item.id==='Maj') : null);
+            return type ? {rootPc, rootName, suffix, type, preferFlats:match[2]==='b'} : null;
+        };
+        const spellPc = (pc, preferFlats = false) => (preferFlats ? NOTE_FLATS : NOTES_C)[(pc+12)%12];
 
         const UpdateNotice = ({ lang, closing, onDismiss }) => {
             const items = lang === 'zh' ? [
@@ -411,20 +512,66 @@
             return { id:'simulated', label, zh, en, formula:additions.length ? `${base.formula}-${symbols.join('-')}` : base.formula, intervals, additions, candidates: additions.length ? [`${base.label}${symbols.map(s=>`+${s}`).join('')}`] : [] };
         };
 
-        const DetailSheet = ({ root, typeObj, mode, onClose, t, lang }) => {
+        const CollectionPage = ({ kind, items, lang, onOpen, onRemove, onClear, onFavorite, onCompare }) => {
+            const [filterRoot, setFilterRoot] = useState('all');
+            const [filterType, setFilterType] = useState('all');
+            const [order, setOrder] = useState('recent');
+            const title = kind === 'favorites' ? (lang==='zh'?'我的收藏':'My Favorites') : (lang==='zh'?'最近瀏覽':'Recently Viewed');
+            const filtered = [...items].filter(item => (filterRoot==='all'||item.root===filterRoot) && (filterType==='all'||item.label===filterType)).sort((a,b) => {
+                if(order==='root') return a.root.localeCompare(b.root);
+                if(order==='type') return a.label.localeCompare(b.label);
+                return new Date(b.savedAt || b.viewedAt) - new Date(a.savedAt || a.viewedAt);
+            });
+            const roots = [...new Set(items.map(item=>item.root))].sort();
+            const types = [...new Set(items.map(item=>item.label))].sort();
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in">
+                <div className="feature-heading"><span>{kind==='favorites'?'PERSONAL LIBRARY':'VOICING HISTORY'}</span><h2>{title}</h2><p>{kind==='favorites' ? (lang==='zh'?'收藏會保留在這個瀏覽器，可儲存同一和弦的不同把位。':'Favorites stay in this browser and can include different positions of the same chord.') : (lang==='zh'?`最多保留 ${MAX_RECENTS} 筆；再次查看相同指法只會更新時間。`:`Keeps up to ${MAX_RECENTS} entries; revisiting a voicing updates its time.`)}</p></div>
+                <div className="feature-toolbar"><select value={filterRoot} onChange={e=>setFilterRoot(e.target.value)}><option value="all">{lang==='zh'?'全部根音':'All roots'}</option>{roots.map(x=><option key={x}>{x}</option>)}</select><select value={filterType} onChange={e=>setFilterType(e.target.value)}><option value="all">{lang==='zh'?'全部類型':'All types'}</option>{types.map(x=><option key={x}>{x}</option>)}</select><select value={order} onChange={e=>setOrder(e.target.value)}><option value="recent">{lang==='zh'?'依時間':'By time'}</option><option value="root">{lang==='zh'?'依根音':'By root'}</option><option value="type">{lang==='zh'?'依類型':'By type'}</option></select>{items.length>0&&kind==='recent'&&<button className="feature-danger" onClick={onClear}>{lang==='zh'?'清除全部':'Clear all'}</button>}</div>
+                {filtered.length ? <div className="saved-grid">{filtered.map(item=><article className="saved-card" key={item.key}><button className="saved-card-main" onClick={()=>onOpen(item)}><VoicingThumbnail dots={item.dots}/><div><strong>{item.soundingRoot || item.root}{item.label}</strong><span>{lang==='zh'?`第 ${item.position} 把位 · ${item.analysis?.difficulty || '—'}`:`Position ${item.position} · ${item.analysis?.difficulty || '—'}`}</span><small>{formatViewedAt(item.savedAt || item.viewedAt, lang)}</small></div></button><div className="saved-actions"><button onClick={()=>onCompare(item)}>{lang==='zh'?'加入比較':'Compare'}</button>{kind==='favorites'&&<button onClick={()=>onFavorite(item)}>{lang==='zh'?'取消收藏':'Remove'}</button>}<button onClick={()=>onRemove(item.key)} aria-label={lang==='zh'?'刪除':'Delete'}>×</button></div></article>)}</div> : <div className="feature-empty"><b>{lang==='zh'?'尚無資料':'Nothing here yet'}</b><p>{kind==='favorites'?(lang==='zh'?'在「具體按法」中按下收藏，即可建立自己的指法庫。':'Use the save button in a concrete voicing to build your library.'):(lang==='zh'?'開啟任何具體和弦指法後，紀錄會自動出現在這裡。':'Open a concrete voicing and it will appear here automatically.')}</p></div>}
+            </section>;
+        };
+
+        const ComparePage = ({ items, lang, onOpen, onRemove }) => <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>VOICING COMPARISON</span><h2>{lang==='zh'?'指法比較':'Compare Voicings'}</h2><p>{lang==='zh'?'難度由橫按候選、品格跨度與使用弦數計算，僅作練習規劃參考，不等同唯一正確指法。':'Difficulty is a repeatable guide based on barre candidates, fret span, and sounding strings—not a claim of one exact fingering.'}</p></div>{items.length ? <div className="compare-scroll">{items.map(item=><article className="compare-card" key={item.key}><div className="compare-top"><strong>{item.soundingRoot || item.root}{item.label}</strong><button onClick={()=>onRemove(item.key)}>×</button></div><VoicingThumbnail item={item}/><dl><div><dt>{lang==='zh'?'組成音':'Tones'}</dt><dd>{item.formula}</dd></div><div><dt>{lang==='zh'?'把位':'Position'}</dt><dd>{item.position}</dd></div><div><dt>{lang==='zh'?'發聲／悶弦':'Sounding / muted'}</dt><dd>{item.analysis?.activeStrings?.length} / {item.analysis?.mutedStrings?.length}</dd></div><div><dt>{lang==='zh'?'橫按候選':'Barre candidate'}</dt><dd>{item.analysis?.barreFret ? (lang==='zh'?'可能需要':'Likely') : (lang==='zh'?'不需要':'No')}</dd></div><div><dt>{lang==='zh'?'跨度／難度':'Span / difficulty'}</dt><dd>{item.analysis?.span} · {item.analysis?.difficulty}</dd></div><div><dt>{lang==='zh'?'按弦提示':'Fingering guide'}</dt><dd>{item.analysis?.guide}</dd></div></dl><div className="saved-actions"><button onClick={()=>playNotes(item.dots,'guitar')}>{lang==='zh'?'播放':'Play'}</button><button onClick={()=>onOpen(item)}>{lang==='zh'?'查看':'Open'}</button></div></article>)}</div> : <div className="feature-empty"><b>{lang==='zh'?'比較區是空的':'Comparison is empty'}</b><p>{lang==='zh'?'從任何具體指法按下「加入比較」。':'Add concrete voicings from a chord detail view.'}</p></div>}</section>;
+
+        const INTERVALS_FOR_PRACTICE = [{s:0,zh:'純一度',en:'Perfect unison'},{s:1,zh:'小二度',en:'Minor 2nd'},{s:2,zh:'大二度',en:'Major 2nd'},{s:3,zh:'小三度',en:'Minor 3rd'},{s:4,zh:'大三度',en:'Major 3rd'},{s:5,zh:'純四度',en:'Perfect 4th'},{s:7,zh:'純五度',en:'Perfect 5th'},{s:8,zh:'小六度',en:'Minor 6th'},{s:9,zh:'大六度',en:'Major 6th'},{s:10,zh:'小七度',en:'Minor 7th'},{s:11,zh:'大七度',en:'Major 7th'},{s:12,zh:'純八度',en:'Octave'}];
+        const pick = list => list[Math.floor(Math.random()*list.length)];
+        const PracticeMode = ({ chordTypes, stats, onResult, onDuration, lang }) => {
+            const [tab,setTab] = useState('interval'); const [intervalMode,setIntervalMode] = useState('sequential'); const [question,setQuestion] = useState(()=>pick(INTERVALS_FOR_PRACTICE)); const [chordQ,setChordQ] = useState(()=>pick(chordTypes.filter(x=>['Maj','m'].includes(x.id)))); const [advanced,setAdvanced] = useState(false); const [feedback,setFeedback] = useState(''); const [handsType,setHandsType] = useState('Maj'); const [mic,setMic] = useState('idle'); const streamRef = useRef(null); const analyserRef = useRef(null); const audioCtxRef = useRef(null); const startedAt = useRef(Date.now());
+            useEffect(()=>()=>{ if(streamRef.current) streamRef.current.getTracks().forEach(track=>track.stop()); onDuration(Math.round((Date.now()-startedAt.current)/1000)); },[]);
+            const intervalOptions = [...new Set([question, ...INTERVALS_FOR_PRACTICE.filter(x=>x.s!==question.s).sort(()=>Math.random()-.5).slice(0,5)])].sort((a,b)=>a.s-b.s);
+            const eligible = chordTypes.filter(x=>advanced ? ['Maj','m','dim','aug','7','Maj7','m7'].includes(x.id) : ['Maj','m'].includes(x.id));
+            const askChord = () => {const next=pick(eligible); setChordQ(next); setFeedback(''); playChordIntervals(Math.floor(Math.random()*12),next.intervals,'guitar');};
+            const answer = (correct, topic) => { setFeedback(correct ? (lang==='zh'?'答對了！請繼續聽下一題。':'Correct — listen for the next one.') : (lang==='zh'?'再聽一次，留意根音與色彩音。':'Try again: listen for the root and color tones.')); onResult(topic,correct); };
+            const requestMic = async () => { if(!navigator.mediaDevices?.getUserMedia){setMic('unsupported');return;} try {streamRef.current=await navigator.mediaDevices.getUserMedia({audio:true}); const ctx=getAudioContext(); const analyser=ctx.createAnalyser(); analyser.fftSize=2048; ctx.createMediaStreamSource(streamRef.current).connect(analyser); analyserRef.current=analyser; audioCtxRef.current=ctx; setMic('ready');}catch(e){setMic(e.name==='NotAllowedError'?'denied':'error');} };
+            const checkMicPitch = () => { const analyser=analyserRef.current; const ctx=audioCtxRef.current; if(!analyser||!ctx){setFeedback(lang==='zh'?'尚未收到可分析的麥克風輸入。':'No microphone input is available yet.');return;} const samples=new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(samples); const hz=estimatePitch(samples,ctx.sampleRate); if(!hz){setFeedback(lang==='zh'?'尚未偵測到穩定音高；請彈一條琴弦並靠近麥克風。':'No stable pitch detected. Play one string close to the microphone.');return;} const pc=((Math.round(69+12*Math.log2(hz/440))%12)+12)%12; const degree=(pc+12)%12; const targetPcs=target.intervals.map(i=>i%12); const match=targetPcs.includes(degree); setFeedback(lang==='zh'?`偵測到約 ${Math.round(hz)} Hz（${NOTES_C[pc]}）。${match?'這是目標和弦的組成音。':'這不是此 C 和弦的預期組成音。'} 音訊推測不代表手指位置。`:`Detected about ${Math.round(hz)} Hz (${NOTES_C[pc]}). ${match?'It is a chord tone.':'It is not an expected tone for this C chord.'} Audio estimation does not identify finger position.`); };
+            const target = chordTypes.find(x=>x.id===handsType) || chordTypes[0]; const targetDots = generateVoicings(0,target,[6,5,4,3],true,true)[0] || [];
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>INTERACTIVE PRACTICE</span><h2>{lang==='zh'?'互動練習模式':'Practice Mode'}</h2><p>{lang==='zh'?'聽覺題目與練習紀錄只存於本機。麥克風只會在你按下授權後使用，音訊結果只估計音高，無法辨識手指實際按在哪一格。':'Ear-training and results stay on this device. The microphone is requested only after you choose it; audio can estimate pitch, not your actual finger position.'}</p></div><div className="practice-tabs">{[['interval',lang==='zh'?'音程聽辨':'Intervals'],['chord',lang==='zh'?'和弦聽辨':'Chords'],['hands',lang==='zh'?'實際按弦':'Play along']].map(([id,label])=><button key={id} onClick={()=>{setTab(id);setFeedback('');}} className={tab===id?'active':''}>{label}</button>)}</div>
+                {tab==='interval'&&<div className="practice-panel"><div className="feature-toolbar"><button onClick={()=>setIntervalMode(x=>x==='sequential'?'together':'sequential')}>{intervalMode==='sequential'?(lang==='zh'?'依序播放':'Sequential'):(lang==='zh'?'同時播放':'Together')}</button><button onClick={()=>playMidiTones([midiForPitchClass(0,4),midiForPitchClass(question.s,4)],'piano',intervalMode==='together')}>{lang==='zh'?'播放題目':'Play question'}</button><button onClick={()=>{setQuestion(pick(INTERVALS_FOR_PRACTICE));setFeedback('');}}>{lang==='zh'?'下一題':'Next'}</button></div><h3>{lang==='zh'?'聽兩個音的距離':'Name the interval'}</h3><div className="quiz-grid">{intervalOptions.map(x=><button key={x.s} onClick={()=>answer(x.s===question.s,'interval')}><b>{lang==='zh'?x.zh:x.en}</b></button>)}</div></div>}
+                {tab==='chord'&&<div className="practice-panel"><div className="feature-toolbar"><button onClick={()=>{setAdvanced(v=>!v);setFeedback('');}}>{advanced?(lang==='zh'?'進階：三和弦＋七和弦':'Advanced: triads + sevenths'):(lang==='zh'?'初階：大小三和弦':'Basic: major/minor')}</button><button onClick={()=>playChordIntervals(0,chordQ.intervals,'guitar')}>{lang==='zh'?'播放題目':'Play question'}</button><button onClick={askChord}>{lang==='zh'?'下一題':'Next'}</button></div><h3>{lang==='zh'?'辨識和弦類型':'Identify the chord quality'}</h3><div className="quiz-grid">{eligible.map(x=><button key={x.id} onClick={()=>answer(x.id===chordQ.id,'chord')}><b>{x.label || (lang==='zh'?'大三':'Major')}</b><small>{lang==='zh'?x.zh:x.en}</small></button>)}</div></div>}
+                {tab==='hands'&&<div className="practice-panel hands-panel"><div><label>{lang==='zh'?'目標和弦':'Target chord'} <select value={handsType} onChange={e=>setHandsType(e.target.value)}>{chordTypes.filter(x=>['Maj','m','7','Maj7','m7'].includes(x.id)).map(x=><option key={x.id} value={x.id}>C{x.label || ' major'}</option>)}</select></label><button onClick={()=>playNotes(targetDots,'guitar')}>{lang==='zh'?'播放目標':'Play target'}</button></div><VoicingThumbnail dots={targetDots}/><p>{lang==='zh'?'先依照圖在真實吉他按 C 和弦形狀，再選擇手動確認或麥克風檢查。':'Finger the displayed C-shape on your guitar, then use manual confirmation or request microphone access.'}</p><div className="saved-actions"><button onClick={()=>answer(true,'hands')}>{lang==='zh'?'我已完成（手動）':'I played it (manual)'}</button>{mic==='idle'&&<button onClick={requestMic}>{lang==='zh'?'啟用麥克風檢查':'Enable microphone check'}</button>}{mic==='ready'&&<><button onClick={checkMicPitch}>{lang==='zh'?'檢查目前音高':'Check current pitch'}</button><span className="mic-status">{lang==='zh'?'麥克風已授權；分析的是目前音高，不會辨識手指實際位置。':'Microphone granted; analysis estimates pitch only, not finger position.'}</span></>}{['denied','unsupported','error'].includes(mic)&&<span className="mic-status error">{mic==='denied'?(lang==='zh'?'你拒絕了麥克風授權，仍可使用手動模式。':'Microphone permission was denied; manual mode remains available.'):mic==='unsupported'?(lang==='zh'?'此裝置不支援麥克風功能。':'This device does not support microphone input.'):(lang==='zh'?'無法啟用麥克風，請使用手動模式。':'Microphone could not be started; use manual mode.')}</span>}</div></div>}
+                {feedback&&<div className="practice-feedback">{feedback}</div>}<div className="practice-stats"><b>{lang==='zh'?'本機練習紀錄':'Local practice record'}</b><span>{lang==='zh'?`作答 ${stats.attempts||0} 次 · 正確 ${stats.correct||0} 次 · 練習 ${Math.round((stats.totalSeconds||0)/60)} 分鐘`:`${stats.attempts||0} attempts · ${stats.correct||0} correct · ${Math.round((stats.totalSeconds||0)/60)} min`}</span><small>{lang==='zh'?((stats.wrongByType?.interval||0)>=(stats.wrongByType?.chord||0)?'建議：先複習音程，再回到和弦聽辨。':'建議：比較大、小與七和弦的三度、七度色彩。'):((stats.wrongByType?.interval||0)>=(stats.wrongByType?.chord||0)?'Suggestion: revisit intervals before chord identification.':'Suggestion: compare the 3rd and 7th colors in major, minor, and seventh chords.')}</small></div></section>;
+
+        const TransposeTool = ({ chordTypes, lang, onFavorite, onCompare }) => {
+            const [input,setInput]=useState('Cmaj7 Dm7 G7 Cmaj7'); const [from,setFrom]=useState('C'); const [to,setTo]=useState('D'); const [capo,setCapo]=useState(0);
+            const shift=(NOTES_C.indexOf(to)-NOTES_C.indexOf(from)+12)%12;
+            const parsed=input.split(/[\s,|]+/).filter(Boolean).map(token=>parseChordSymbol(token,chordTypes)).filter(Boolean);
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>CHORD TRANSPOSITION</span><h2>{lang==='zh'?'和弦轉調工具':'Transpose Chords'}</h2><p>{lang==='zh'?'輸入空格分隔的單一和弦或進行。移調夾會讓「按奏形狀」與「實際發聲」清楚分列。':'Enter one chord or a progression separated by spaces. Capo separates the played shape from the sounding chord.'}</p></div><div className="transpose-controls"><textarea value={input} onChange={e=>setInput(e.target.value)} aria-label="Chord progression"/><label>{lang==='zh'?'原調':'From'}<select value={from} onChange={e=>setFrom(e.target.value)}>{NOTES_C.map(x=><option key={x}>{x}</option>)}</select></label><label>{lang==='zh'?'目標調':'To'}<select value={to} onChange={e=>setTo(e.target.value)}>{NOTES_C.map(x=><option key={x}>{x}</option>)}</select></label><label>{lang==='zh'?'移調夾':'Capo'}<select value={capo} onChange={e=>setCapo(Number(e.target.value))}>{Array.from({length:13},(_,i)=><option key={i} value={i}>{i}</option>)}</select></label><span>{lang==='zh'?`移動 ${shift} 個半音`:`${shift} semitones`}</span></div>{parsed.length?<div className="transpose-grid">{parsed.map((item,index)=>{const soundingPc=(item.rootPc+shift)%12; const shapePc=(soundingPc-capo+12)%12; const sounding=spellPc(soundingPc,item.preferFlats); const shape=spellPc(shapePc,item.preferFlats); const voicings=generateVoicings(shapePc,item.type,[6,5,4,3],true,true); const dots=voicings[0]||[]; const record={...buildVoicingRecord(shape,item.type,dots,capo),soundingRoot:sounding}; return <article className="transpose-card" key={`${input}-${index}`}><span>{index+1}</span><h3>{item.rootName}{item.type.label} <i>→</i> {sounding}{item.type.label}</h3><small>{capo?(lang==='zh'?`按奏：${shape}${item.type.label}（Capo ${capo}）`:`Shape: ${shape}${item.type.label} (Capo ${capo})`):(lang==='zh'?`按奏與發聲：${sounding}${item.type.label}`:`Played & sounding: ${sounding}${item.type.label}`)}</small><VoicingThumbnail dots={dots}/><div className="mini-voicings">{voicings.slice(0,3).map((v,i)=><button key={i} onClick={()=>playNotes(v,'guitar')}>{lang==='zh'?`替代把位 ${i+1}`:`Alt. ${i+1}`}</button>)}</div><div className="saved-actions"><button onClick={()=>playChordIntervals(soundingPc,item.type.intervals,'guitar')}>{lang==='zh'?'播放':'Play'}</button><button onClick={()=>onFavorite(record)}>{lang==='zh'?'收藏':'Save'}</button><button onClick={()=>onCompare(record)}>{lang==='zh'?'比較':'Compare'}</button></div></article>})}</div>:<div className="feature-empty"><b>{lang==='zh'?'找不到可辨識的和弦':'No recognizable chords'}</b><p>{lang==='zh'?'請使用例如 C、Cm、Cmaj7、Bb7、F#m7b5 的寫法。':'Try symbols such as C, Cm, Cmaj7, Bb7, or F#m7b5.'}</p></div>}</section>;
+
+        const DetailSheet = ({ root, typeObj, mode, onClose, t, lang, presetVoicing, onFavorite, isFavorite, onCompare, isCompared, onVoicingViewed }) => {
             const [disp, setDisp] = useState('note');
-            const [vMode, setVMode] = useState('arpeggio');
+            const [vMode, setVMode] = useState(presetVoicing ? 'voicing' : 'arpeggio');
             const [selectedStrings, setSelectedStrings] = useState([6,5,4,3]);
             const [includeRoot, setIncludeRoot] = useState(true);
             const [vIndex, setVIndex] = useState(0);
             const [isFriendly, setIsFriendly] = useState(false);
             const [instrument, setInstrument] = useState('guitar');
+            const [restoredVoicing, setRestoredVoicing] = useState(presetVoicing || null);
 
             const { dots, availableVoicings } = useMemo(() => {
                 const rootPc = NOTES_C.indexOf(root);
                 if (mode === 'chord' && vMode === 'voicing') {
                     const vs = generateVoicings(rootPc, typeObj, selectedStrings, includeRoot, isFriendly);
-                    return { dots: vs[vIndex] || [], availableVoicings: vs.length };
+                    return { dots: restoredVoicing || vs[vIndex] || [], availableVoicings: vs.length };
                 }
 
                 const res = [];
@@ -437,14 +584,17 @@
                     }
                 }
                 return { dots: res, availableVoicings: 0 };
-            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly]);
+            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly, restoredVoicing]);
 
+            const currentRecord = mode === 'chord' && vMode === 'voicing' && dots.length ? {...buildVoicingRecord(root, typeObj, dots), includeRoot, isFriendly, selectedStrings} : null;
+            useEffect(() => { if (currentRecord) onVoicingViewed?.(currentRecord); }, [root, typeObj, vMode, includeRoot, isFriendly, selectedStrings.join(','), vIndex, dots.map(dot=>`${dot.string}:${dot.fret}`).join('|')]);
+            const resetPreset = () => setRestoredVoicing(null);
             const toggleString = (string) => {
                 setSelectedStrings(previous => {
                     const next = previous.includes(string) ? previous.filter(s=>s!==string) : [...previous,string];
                     return next.sort((a,b)=>b-a);
                 });
-                setVIndex(0);
+                setVIndex(0); resetPreset();
             };
 
             return (
@@ -493,9 +643,9 @@
                                 <div className="voicing-topline">
                                     <div className="root-control">
                                         <div><span>{lang==='zh'?'包含根音':'Include root'}</span><small>{includeRoot ? (lang==='zh'?'一般和弦排列':'Standard voicing') : (lang==='zh'?'由貝斯負責根音':'Bass-led rootless voicing')}</small></div>
-                                        <button role="switch" aria-checked={includeRoot} onClick={()=>{setIncludeRoot(v=>!v);setVIndex(0);}} className={`root-switch ${includeRoot?'on':''}`}><i></i></button>
+                                        <button role="switch" aria-checked={includeRoot} onClick={()=>{setIncludeRoot(v=>!v);setVIndex(0);resetPreset();}} className={`root-switch ${includeRoot?'on':''}`}><i></i></button>
                                     </div>
-                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);}} className={`friendly-toggle ${isFriendly?'active':''}`}>
+                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);resetPreset();}} className={`friendly-toggle ${isFriendly?'active':''}`}>
                                         {lang==='zh'?'友好模式':'Friendly'} <small>{isFriendly ? (lang==='zh'?'窄跨度優先':'Narrow span') : (lang==='zh'?'進階排列':'Advanced')}</small>
                                     </button>
                                 </div>
@@ -509,15 +659,17 @@
                                 </div>
                                 {availableVoicings > 0 ? (
                                     <div className="flex items-center gap-4 text-[11px] tracking-widest text-zinc-400">
-                                        <button onClick={()=>setVIndex(v => Math.max(0, v-1))} disabled={vIndex===0} className="hover:text-white disabled:opacity-30">&larr;</button>
+                                        <button onClick={()=>{setVIndex(v => Math.max(0, v-1));resetPreset();}} disabled={vIndex===0} className="hover:text-white disabled:opacity-30">&larr;</button>
                                         <span>{lang==='zh'?'變體':'Variant'} {vIndex + 1} / {availableVoicings}</span>
-                                        <button onClick={()=>setVIndex(v => Math.min(availableVoicings-1, v+1))} disabled={vIndex===availableVoicings-1} className="hover:text-white disabled:opacity-30">&rarr;</button>
+                                        <button onClick={()=>{setVIndex(v => Math.min(availableVoicings-1, v+1));resetPreset();}} disabled={vIndex===availableVoicings-1} className="hover:text-white disabled:opacity-30">&rarr;</button>
                                     </div>
                                 ) : (
                                     <div className="text-[11px] tracking-widest text-red-400">{selectedStrings.length < 2 ? (lang==='zh'?'請至少選擇兩條琴弦':'Select at least two strings') : (lang==='zh'?'沒有符合根音、琴弦與可演奏性條件的指法':'No playable voicing matches the root, strings, and playability settings')}</div>
                                 )}
                             </div>
                         )}
+
+                        {currentRecord && <div className="voicing-actions"><button onClick={()=>onFavorite?.(currentRecord)} className={isFavorite?.(currentRecord)?'active':''}>{isFavorite?.(currentRecord) ? (lang==='zh'?'已收藏':'Saved') : (lang==='zh'?'收藏指法':'Save voicing')}</button><button onClick={()=>onCompare?.(currentRecord)} className={isCompared?.(currentRecord)?'active':''}>{isCompared?.(currentRecord) ? (lang==='zh'?'已加入比較':'In comparison') : (lang==='zh'?'加入比較':'Compare')}</button></div>}
 
                         <Fretboard dots={dots} disp={disp} instrument={instrument} />
                     </div>
@@ -543,6 +695,10 @@
             const [simRoot, setSimRoot] = useState('C');
             const [simBaseId, setSimBaseId] = useState('Maj7');
             const [simAdditions, setSimAdditions] = useState([]);
+            const [favorites, setFavorites] = useState(() => readJson(FAVORITES_STORAGE_KEY, []));
+            const [recents, setRecents] = useState(() => readJson(RECENTS_STORAGE_KEY, []));
+            const [compareItems, setCompareItems] = useState([]);
+            const [practiceStats, setPracticeStats] = useState(() => readJson(PRACTICE_STORAGE_KEY, {attempts:0,correct:0,totalSeconds:0,wrongByType:{}}));
 
             useEffect(() => {
                 const TEXT = {
@@ -674,6 +830,9 @@
                 document.documentElement.lang = lang === 'zh' ? 'zh-Hant' : 'en';
                 document.title = lang === 'zh' ? '吉他顧問－2026 典藏版' : 'Guitar Advisor — 2026 Collection';
             }, [lang]);
+            useEffect(() => { writeLocal(FAVORITES_STORAGE_KEY, JSON.stringify(favorites)); }, [favorites]);
+            useEffect(() => { writeLocal(RECENTS_STORAGE_KEY, JSON.stringify(recents)); }, [recents]);
+            useEffect(() => { writeLocal(PRACTICE_STORAGE_KEY, JSON.stringify(practiceStats)); }, [practiceStats]);
 
             if (!db) return <div className="h-screen flex items-center justify-center text-bronze tracking-[0.5em] text-[11px]">LOADING...</div>;
             const t = db.c.TEXT[lang] || db.c.TEXT['zh'];
@@ -695,8 +854,23 @@
                 if (simulatorBase.intervals.includes(interval)) return;
                 setSimAdditions(current => current.includes(interval) ? current.filter(i=>i!==interval) : current.length < 2 ? [...current,interval] : [...current.slice(1),interval]);
             };
+            const toggleFavorite = (record) => setFavorites(current => current.some(item=>item.key===record.key) ? current.filter(item=>item.key!==record.key) : [{...record,savedAt:new Date().toISOString()},...current]);
+            const addRecent = (record) => setRecents(current => [{...record,viewedAt:new Date().toISOString()},...current.filter(item=>item.key!==record.key)].slice(0,MAX_RECENTS));
+            const toggleCompare = (record) => setCompareItems(current => current.some(item=>item.key===record.key) ? current.filter(item=>item.key!==record.key) : [...current,record].slice(-3));
+            const restoreRecord = (record) => {
+                const known = db.ch.CHORD_TYPES.find(item=>item.id===record.typeId);
+                const restoredType = known || {id:record.typeId,label:record.label,zh:record.zh||record.label,en:record.en||record.label,formula:record.formula,intervals:record.intervals||[]};
+                setDetail({root:record.root,typeObj:restoredType,mode:'chord',presetVoicing:record.dots});
+            };
+            const recordPractice = (topic, correct) => setPracticeStats(current => ({...current,attempts:(current.attempts||0)+1,correct:(current.correct||0)+(correct?1:0),wrongByType:{...(current.wrongByType||{}),[topic]:((current.wrongByType||{})[topic]||0)+(correct?0:1)}}));
+            const recordDuration = (seconds) => setPracticeStats(current => ({...current,totalSeconds:(current.totalSeconds||0)+Math.max(0,seconds||0)}));
 
             const renderMain = () => {
+                if (mode === 'favorites') return <CollectionPage kind="favorites" items={favorites} lang={lang} onOpen={restoreRecord} onRemove={key=>setFavorites(current=>current.filter(item=>item.key!==key))} onFavorite={toggleFavorite} onCompare={toggleCompare}/>;
+                if (mode === 'recent') return <CollectionPage kind="recent" items={recents} lang={lang} onOpen={restoreRecord} onRemove={key=>setRecents(current=>current.filter(item=>item.key!==key))} onClear={()=>setRecents([])} onCompare={toggleCompare}/>;
+                if (mode === 'compare') return <ComparePage items={compareItems} lang={lang} onOpen={restoreRecord} onRemove={key=>setCompareItems(current=>current.filter(item=>item.key!==key))}/>;
+                if (mode === 'practice') return <PracticeMode chordTypes={db.ch.CHORD_TYPES} stats={practiceStats} onResult={recordPractice} onDuration={recordDuration} lang={lang}/>;
+                if (mode === 'transpose') return <TransposeTool chordTypes={db.ch.CHORD_TYPES} lang={lang} onFavorite={toggleFavorite} onCompare={toggleCompare}/>;
                 if (mode === 'theory') {
                     const lessons = lang === 'zh' ? [
                         {no:'01',title:'指板上的音程',body:'把根音當作 1。往高一格是小二度，兩格是大二度，三格是小三度，四格是大三度，七格是完全五度。相同形狀移到不同根音，音程關係不變。',tip:'先記住第 6、5 弦根音，再用形狀定位其他音。'},
@@ -859,9 +1033,12 @@
                             <button onClick={()=>{setMode('builder'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='builder'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'和弦加音模擬器':'Add-Note Simulator'}</button>
                             <button onClick={()=>{setMode('theory'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='theory'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'基本樂理':'Music Theory'}</button>
                         </div>
+                        <div className="feature-nav" aria-label={lang==='zh'?'個人工具':'Personal tools'}>
+                            {[['favorites',lang==='zh'?'我的收藏':'Favorites'],['recent',lang==='zh'?'最近瀏覽':'Recent'],['compare',lang==='zh'?'指法比較':'Compare'],['practice',lang==='zh'?'練習模式':'Practice'],['transpose',lang==='zh'?'和弦轉調':'Transpose']].map(([id,label])=><button key={id} onClick={()=>{setMode(id);setCatId(null);setTypeObj(null);}} className={mode===id?'active':''}>{label}{id==='compare'&&compareItems.length>0?<sup>{compareItems.length}</sup>:null}</button>)}
+                        </div>
                     </header>
                     <main>{renderMain()}</main>
-                    {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} />}
+                    {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} onFavorite={toggleFavorite} isFavorite={record=>favorites.some(item=>item.key===record.key)} onCompare={toggleCompare} isCompared={record=>compareItems.some(item=>item.key===record.key)} onVoicingViewed={addRecent} />}
                     {showUpdateNotice && <UpdateNotice lang={lang} closing={closingUpdateNotice} onDismiss={dismissUpdateNotice} />}
                     <footer className="text-center py-10 mt-20 border-t border-white/5">
                         <p className="text-[10px] text-zinc-600 tracking-[0.25em] uppercase">
