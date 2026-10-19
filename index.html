@@ -323,11 +323,12 @@
         // the public site will not auto-announce them before approval.
         const RELEASE_DIGEST = {
             siteId:'guitar-helper-gm', siteName:'吉他幫手 GM', version:'1.2.0', releasedAt:null, status:'draft',
-            summary:'以更簡單的琴弦選擇、緊湊操作列與智慧加音，縮短從和弦查詢到實際演奏的步驟。',
+            summary:'琴弦與指法控制更直覺，自訂加音會自動尋找可演奏位置，讓和弦探索更快速。',
+            summaryEn:'String and voicing controls are simpler, and custom additions now find playable positions automatically.',
             highlights:['和弦分類、名稱與音程分析更一致','六弦包含／排除切換','單行圖示化和弦操作列','輸入音名或音級即可自動找加音指法'],
             improvements:['加音預覽、替換把位與互動指板使用同一套指法資料','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
             fixes:['移除詳細頁過度複雜的必須／靜音琴弦限制','移除聽辨選擇題與答題統計的舊狀態流程'],
-            officialReleaseUrl:'https://brian53013new.github.io/Brian-Code-Official-website/'
+            officialReleaseUrl:'https://brian53013new.github.io/Guitar-Chord-Master/'
         };
         const UPDATE_NOTICE_STORAGE_KEY = `guitar-helper-gm-update-${RELEASE_DIGEST.version}`;
         const IS_RELEASE_PREVIEW = RELEASE_DIGEST.status === 'draft' && (
@@ -428,11 +429,24 @@
 
         const UpdateNotice = ({ lang, closing, onDismiss }) => {
             const closeRef = useRef(null);
+            const dialogRef = useRef(null);
             useEffect(() => {
+                const returnFocusTo = document.activeElement;
                 closeRef.current?.focus();
-                const onKeyDown = event => { if (event.key === 'Escape') onDismiss(); };
+                const onKeyDown = event => {
+                    if (event.key === 'Escape') { onDismiss(); return; }
+                    if (event.key !== 'Tab') return;
+                    const focusable = [...(dialogRef.current?.querySelectorAll('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])') || [])];
+                    if (!focusable.length) return;
+                    const first = focusable[0], last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+                };
                 window.addEventListener('keydown', onKeyDown);
-                return () => window.removeEventListener('keydown', onKeyDown);
+                return () => {
+                    window.removeEventListener('keydown', onKeyDown);
+                    if (returnFocusTo?.isConnected) returnFocusTo.focus();
+                };
             }, [onDismiss]);
             const items = lang === 'zh' ? RELEASE_DIGEST.highlights : [
                 'Chord categories, names, pitch sets, and interval analysis are more consistent.',
@@ -442,16 +456,16 @@
             ];
             return (
                 <div className={`update-notice ${closing ? 'closing' : ''}`} onClick={onDismiss}>
-                    <section className="update-notice-card" aria-modal="true" role="dialog" aria-labelledby="update-notice-title" aria-describedby="update-notice-summary">
+                    <section ref={dialogRef} className="update-notice-card" onClick={event=>event.stopPropagation()} aria-modal="true" role="dialog" aria-labelledby="update-notice-title" aria-describedby="update-notice-summary">
                         <button ref={closeRef} type="button" className="update-notice-close" onClick={onDismiss} aria-label={lang==='zh'?'稍後再看':'View later'}>×</button>
                         <div className="update-notice-eyebrow">{RELEASE_DIGEST.siteName} · v{RELEASE_DIGEST.version}</div>
                         <div className={`update-notice-status ${RELEASE_DIGEST.status}`}>{lang==='zh'?'草稿預覽｜日期待公布':'Draft preview · Date pending'}</div>
                         <h2 id="update-notice-title">{lang==='zh'?'更新懶人包':'What’s new'}</h2>
-                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:'A simpler chord workflow with string toggles, compact controls, and smart playable add-notes.'}</p>
+                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:RELEASE_DIGEST.summaryEn}</p>
                         <ul className="update-notice-list">{items.map(item=><li key={item}>{item}</li>)}</ul>
                         <div className="update-notice-footer">
                             <span>{lang==='zh'?'目前待 PR 審核，尚未正式合併發布。':'Awaiting PR review; not yet released.'}</span>
-                            <a href={RELEASE_DIGEST.officialReleaseUrl} target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'到官方網站看完整更新':'View official updates'}</a>
+                            <a href={RELEASE_DIGEST.officialReleaseUrl} target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'前往吉他正式網站':'Open official guitar site'}</a>
                         </div>
                     </section>
                 </div>
