@@ -322,11 +322,11 @@
         // Shared release schema. Drafts are visible only in authenticated preview/dev builds;
         // the public site will not auto-announce them before approval.
         const RELEASE_DIGEST = {
-            siteId:'guitar-helper-gm', siteName:'吉他幫手 GM', version:'1.1.0', releasedAt:null, status:'draft',
-            summary:'重新整理和弦資料與指法工作流程，讓搜尋、比較、轉調、加音與爵士無根音排列共用一致的互動指板。',
-            highlights:['和弦分類、名稱與音程分析更一致','Rootless Voicing 與六弦發聲條件控制','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
-            improvements:['大型指法切換控制與即時狀態回饋','手機版觸控操作與智慧把位範圍','加音模擬器支援自訂音名、音程、琴弦與琴格'],
-            fixes:['移除聽辨選擇題與答題統計的舊狀態流程'],
+            siteId:'guitar-helper-gm', siteName:'吉他幫手 GM', version:'1.2.0', releasedAt:null, status:'draft',
+            summary:'以更簡單的琴弦選擇、緊湊操作列與智慧加音，縮短從和弦查詢到實際演奏的步驟。',
+            highlights:['和弦分類、名稱與音程分析更一致','六弦包含／排除切換','單行圖示化和弦操作列','輸入音名或音級即可自動找加音指法'],
+            improvements:['加音預覽、替換把位與互動指板使用同一套指法資料','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
+            fixes:['移除詳細頁過度複雜的必須／靜音琴弦限制','移除聽辨選擇題與答題統計的舊狀態流程'],
             officialReleaseUrl:'https://brian53013new.github.io/Brian-Code-Official-website/'
         };
         const UPDATE_NOTICE_STORAGE_KEY = `guitar-helper-gm-update-${RELEASE_DIGEST.version}`;
@@ -563,14 +563,11 @@
             const [isFriendly, setIsFriendly] = useState(presetOptions?.isFriendly ?? false);
             const [instrument, setInstrument] = useState('guitar');
             const [restoredVoicing, setRestoredVoicing] = useState(presetVoicing || null);
-            const [requiredStrings, setRequiredStrings] = useState(presetOptions?.requiredStrings || []);
-            const [mutedStrings, setMutedStrings] = useState(presetOptions?.mutedStrings || []);
-            const [allowOpenStrings, setAllowOpenStrings] = useState(presetOptions?.allowOpenStrings ?? true);
 
             const { dots, availableVoicings } = useMemo(() => {
                 const rootPc = NOTES_C.indexOf(root);
                 if (mode === 'chord' && vMode === 'voicing') {
-                    const vs = generateVoicings(rootPc, typeObj, selectedStrings, includeRoot, isFriendly).filter(voicing => requiredStrings.every(string=>voicing.some(note=>note.string===string)) && !voicing.some(note=>mutedStrings.includes(note.string)) && (allowOpenStrings || voicing.every(note=>note.fret>0)));
+                    const vs = generateVoicings(rootPc, typeObj, selectedStrings, includeRoot, isFriendly);
                     return { dots: restoredVoicing || vs[vIndex] || [], availableVoicings: vs.length };
                 }
 
@@ -584,9 +581,9 @@
                     }
                 }
                 return { dots: res, availableVoicings: 0 };
-            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly, restoredVoicing, requiredStrings, mutedStrings, allowOpenStrings]);
+            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly, restoredVoicing]);
 
-            const currentRecord = mode === 'chord' && vMode === 'voicing' && dots.length ? {...buildVoicingRecord(root, typeObj, dots), includeRoot, isFriendly, selectedStrings, requiredStrings, mutedStrings, allowOpenStrings} : null;
+            const currentRecord = mode === 'chord' && vMode === 'voicing' && dots.length ? {...buildVoicingRecord(root, typeObj, dots), includeRoot, isFriendly, selectedStrings} : null;
             useEffect(() => { if (currentRecord) onVoicingViewed?.(currentRecord); }, [root, typeObj, vMode, includeRoot, isFriendly, selectedStrings.join(','), vIndex, dots.map(dot=>`${dot.string}:${dot.fret}`).join('|')]);
             const resetPreset = () => setRestoredVoicing(null);
             const toggleString = (string) => {
@@ -596,9 +593,7 @@
                 });
                 setVIndex(0); resetPreset();
             };
-            const toggleRequiredString = (string) => { setRequiredStrings(current=>current.includes(string)?current.filter(item=>item!==string):[...current,string]); setMutedStrings(current=>current.filter(item=>item!==string)); setSelectedStrings(current=>current.includes(string)?current:[...current,string].sort((a,b)=>b-a)); setVIndex(0); resetPreset(); };
-            const toggleMutedString = (string) => { setMutedStrings(current=>current.includes(string)?current.filter(item=>item!==string):[...current,string]); setRequiredStrings(current=>current.filter(item=>item!==string)); setSelectedStrings(current=>current.filter(item=>item!==string)); setVIndex(0); resetPreset(); };
-            const resetVoicingOptions = () => { setSelectedStrings([6,5,4,3]); setRequiredStrings([]); setMutedStrings([]); setAllowOpenStrings(true); setIncludeRoot(true); setIsFriendly(false); setVIndex(0); resetPreset(); };
+            const resetVoicingOptions = () => { setSelectedStrings([6,5,4,3]); setIncludeRoot(true); setIsFriendly(false); setVIndex(0); resetPreset(); };
 
             return (
                 <div className="gallery-overlay animate-in">
@@ -617,27 +612,17 @@
                                     {mode === 'chord' && vMode === 'voicing' && !includeRoot && <span className="rootless-badge">{lang==='zh'?'無根音排列':'Rootless voicing'}</span>}
                                 </div>
                             </div>
-                            <div className="flex flex-col gap-4 items-end">
-                                <div className="flex gap-4">
-                                    <button onClick={()=>playNotes(dots,instrument)} className="minimal-btn">{t.play}</button>
-                                    <button onClick={()=>setDisp(disp==='note'?'deg':'note')} className="minimal-btn">
-                                        {lang === 'zh' ? (disp === 'note' ? '顯示度數' : '顯示音名') : (disp === 'note' ? 'Show Degrees' : 'Show Notes')}
-                                    </button>
+                            <div className="detail-actions-wrap">
+                                <div className="detail-action-row" aria-label={lang==='zh'?'和弦操作':'Chord actions'}>
+                                    <button onClick={()=>playNotes(dots,instrument)} className="detail-icon-btn" title={t.play}><span aria-hidden="true">▶</span>{t.play}</button>
+                                    <button onClick={()=>setDisp(disp==='note'?'deg':'note')} className="detail-icon-btn" title={lang === 'zh' ? (disp === 'note' ? '顯示度數' : '顯示音名') : (disp === 'note' ? 'Show Degrees' : 'Show Notes')}><span aria-hidden="true">◎</span>{lang === 'zh' ? (disp === 'note' ? '度數' : '音名') : (disp === 'note' ? 'Degrees' : 'Notes')}</button>
+                                    {mode === 'chord' && <button onClick={()=>{setVMode(vMode==='voicing'?'arpeggio':'voicing');setVIndex(0);resetPreset();}} className={`detail-icon-btn ${vMode==='voicing'?'active':''}`}><span aria-hidden="true">⌘</span>{lang==='zh'?(vMode==='voicing'?'指法':'切換指法'):(vMode==='voicing'?'Voicing':'Voicing mode')}</button>}
+                                    {currentRecord && <><button onClick={()=>onFavorite?.(currentRecord)} className={`detail-icon-btn ${isFavorite?.(currentRecord)?'active':''}`}><span aria-hidden="true">{isFavorite?.(currentRecord)?'♥':'♡'}</span>{lang==='zh'?(isFavorite?.(currentRecord)?'已收藏':'收藏'):(isFavorite?.(currentRecord)?'Saved':'Save')}</button><button onClick={()=>onCompare?.(currentRecord)} className={`detail-icon-btn ${isCompared?.(currentRecord)?'active':''}`}><span aria-hidden="true">⇄</span>{lang==='zh'?(isCompared?.(currentRecord)?'已比較':'比較'):(isCompared?.(currentRecord)?'Compared':'Compare')}</button></>}
                                 </div>
-                                <div className="instrument-switch" aria-label={lang==='zh'?'選擇音色':'Choose instrument'}>
+                                <div className="instrument-switch compact" aria-label={lang==='zh'?'選擇音色':'Choose instrument'}>
                                     <button onClick={()=>setInstrument('guitar')} className={instrument==='guitar'?'active':''}>{lang==='zh'?'吉他':'Guitar'}</button>
                                     <button onClick={()=>setInstrument('piano')} className={instrument==='piano'?'active':''}>{lang==='zh'?'鋼琴':'Piano'}</button>
                                 </div>
-                                {mode === 'chord' && (
-                                    <div className="flex bg-white/5 rounded-full p-1 mt-2">
-                                        <button onClick={()=>setVMode('arpeggio')} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='arpeggio'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
-                                            {lang==='zh'?'琶音全景':'Arpeggio'}
-                                        </button>
-                                        <button onClick={()=>{setVMode('voicing'); setVIndex(0);}} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='voicing'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
-                                            {lang==='zh'?'具體按法':'Voicing'}
-                                        </button>
-                                    </div>
-                                )}
                             </div>
                         </div>
 
@@ -652,26 +637,24 @@
                                         {lang==='zh'?'友好模式':'Friendly'} <small>{isFriendly ? (lang==='zh'?'窄跨度優先':'Narrow span') : (lang==='zh'?'進階排列':'Advanced')}</small>
                                     </button>
                                 </div>
-                                <div className="string-picker">
-                                    <div className="string-picker-head"><span>{lang==='zh'?'琴弦條件':'String conditions'}</span><small>{lang==='zh'?'允許、必須發聲與靜音會立即重新計算指法':'Allow, require, and mute settings recalculate voicings immediately'}</small></div>
+                                <div className="string-picker simple-string-picker">
+                                    <div className="string-picker-head"><span>{lang==='zh'?'選擇可用琴弦':'Choose strings'}</span><small>{lang==='zh'?'點擊即可包含或排除；變更後立即重新找指法':'Tap to include or exclude a string; voicings update immediately'}</small></div>
                                     <div className="string-picker-lines">
-                                        {[6,5,4,3,2,1].map(string => <div className="string-condition" key={string}><button type="button" onClick={()=>toggleString(string)} className={`string-choice ${selectedStrings.includes(string)?'selected':''}`}><b>{string}</b><span>{['E','A','D','G','B','E'][6-string]}</span></button><button type="button" onClick={()=>toggleRequiredString(string)} className={requiredStrings.includes(string)?'condition-active':''}>{lang==='zh'?'必':'Req'}</button><button type="button" onClick={()=>toggleMutedString(string)} className={mutedStrings.includes(string)?'condition-muted':''}>{lang==='zh'?'靜':'Mute'}</button></div>)}
+                                        {[6,5,4,3,2,1].map(string => <button type="button" key={string} onClick={()=>toggleString(string)} aria-pressed={selectedStrings.includes(string)} className={`string-toggle ${selectedStrings.includes(string)?'selected':''}`}><b>{string}</b><span>{['E','A','D','G','B','E'][6-string]}</span><i aria-hidden="true">{selectedStrings.includes(string)?'✓':'—'}</i></button>)}
                                     </div>
-                                    <div className="string-condition-actions"><button type="button" onClick={()=>{setAllowOpenStrings(value=>!value);setVIndex(0);resetPreset();}} className={allowOpenStrings?'active':''}>{lang==='zh'?(allowOpenStrings?'允許空弦':'不使用空弦'):(allowOpenStrings?'Open strings allowed':'No open strings')}</button><button type="button" onClick={resetVoicingOptions}>{lang==='zh'?'重設指法條件':'Reset controls'}</button></div>
+                                    <div className="string-condition-actions"><button type="button" onClick={resetVoicingOptions}>{lang==='zh'?'恢復預設琴弦':'Reset strings'}</button></div>
                                 </div>
                                 {availableVoicings > 0 ? (
                                     <div className="voicing-pager" aria-label={lang==='zh'?'指法與把位控制區':'Voicing and position controls'}>
-                                        <button type="button" onClick={()=>{setVIndex(v => Math.max(0, v-1));resetPreset();}} disabled={vIndex===0} className="voicing-step prev"><span aria-hidden="true">←</span><b>{lang==='zh'?'上一個指法':'Previous voicing'}</b></button>
+                                        <button type="button" onClick={()=>{setVIndex(v => Math.max(0, v-1));resetPreset();}} disabled={vIndex===0} className="voicing-step prev"><span aria-hidden="true">←</span><b>{lang==='zh'?'上一個':'Previous'}</b></button>
                                         <div className="voicing-count"><span>{lang==='zh'?'目前指法':'Current voicing'}</span><b>{lang==='zh'?`指法 ${vIndex + 1}／${availableVoicings}`:`Voicing ${vIndex + 1} / ${availableVoicings}`}</b></div>
-                                        <button type="button" onClick={()=>{setVIndex(v => Math.min(availableVoicings-1, v+1));resetPreset();}} disabled={vIndex===availableVoicings-1} className="voicing-step next"><b>{lang==='zh'?'下一個指法':'Next voicing'}</b><span aria-hidden="true">→</span></button>
+                                        <button type="button" onClick={()=>{setVIndex(v => Math.min(availableVoicings-1, v+1));resetPreset();}} disabled={vIndex===availableVoicings-1} className="voicing-step next"><b>{lang==='zh'?'下一個':'Next'}</b><span aria-hidden="true">→</span></button>
                                     </div>
                                 ) : (
                                     <div className="text-[11px] tracking-widest text-red-400">{selectedStrings.length < 2 ? (lang==='zh'?'請至少選擇兩條琴弦':'Select at least two strings') : (lang==='zh'?'沒有符合根音、琴弦與可演奏性條件的指法':'No playable voicing matches the root, strings, and playability settings')}</div>
                                 )}
                             </div>
                         )}
-
-                        {currentRecord && <div className="voicing-actions"><button onClick={()=>onFavorite?.(currentRecord)} className={isFavorite?.(currentRecord)?'active':''}>{isFavorite?.(currentRecord) ? (lang==='zh'?'已收藏':'Saved') : (lang==='zh'?'收藏指法':'Save voicing')}</button><button onClick={()=>onCompare?.(currentRecord)} className={isCompared?.(currentRecord)?'active':''}>{isCompared?.(currentRecord) ? (lang==='zh'?'已加入比較':'In comparison') : (lang==='zh'?'加入比較':'Compare')}</button></div>}
 
                         <Fretboard dots={dots} disp={disp} instrument={instrument} full={mode !== 'chord' || vMode !== 'voicing'} ariaLabel={`${root} ${typeObj.label || ''} fretboard`} />
                     </div>
@@ -698,10 +681,8 @@
             const [simBaseId, setSimBaseId] = useState('Maj7');
             const [simAdditions, setSimAdditions] = useState([]);
             const [customTone, setCustomTone] = useState('');
-            const [customString, setCustomString] = useState(3);
-            const [customFret, setCustomFret] = useState(0);
             const [customToneError, setCustomToneError] = useState('');
-            const [customToneDot, setCustomToneDot] = useState(null);
+            const [customTonePreview, setCustomTonePreview] = useState([]);
             const [favorites, setFavorites] = useState(() => readJson(FAVORITES_STORAGE_KEY, []));
             const [recents, setRecents] = useState(() => readJson(RECENTS_STORAGE_KEY, []));
             const [compareItems, setCompareItems] = useState([]);
@@ -845,6 +826,12 @@
 
             const simulatorBase = db.ch.CHORD_TYPES.find(item=>item.id===simBaseId) || db.ch.CHORD_TYPES[0];
             const simulatedChord = addNoteChord(simulatorBase, simAdditions);
+            const simulatedPreviewDots = (() => {
+                const rootPc = NOTES_C.indexOf(simRoot);
+                const newest = simAdditions[simAdditions.length - 1];
+                const candidates = generateVoicings(rootPc, simulatedChord, [6,5,4,3], true, true);
+                return candidates.find(voicing => newest === undefined || voicing.some(note => note.interval === newest)) || candidates[0] || [];
+            })();
             const openSimulatedChord = () => { setDetail({root:simRoot, typeObj:simulatedChord, mode:'chord'}); notify(lang==='zh'?'已開啟互動指板':'Interactive fretboard opened'); };
             const selectTheme = (nextTheme) => {
                 setTheme(nextTheme);
@@ -859,30 +846,41 @@
             const toggleAddition = (interval) => {
                 if (simulatorBase.intervals.includes(interval)) return;
                 setSimAdditions(current => current.includes(interval) ? current.filter(i=>i!==interval) : current.length < 2 ? [...current,interval] : [...current.slice(1),interval]);
+                setCustomToneError('');
             };
             const addCustomTone = () => {
                 const raw = customTone.trim().replace(/♯/g,'#').replace(/♭/g,'b');
-                const intervalMap = {2:2,4:5,6:9,9:2,11:5,13:9};
-                let interval = intervalMap[raw];
+                const rootPc = NOTES_C.indexOf(simRoot);
+                const scaleIntervals = {1:0,2:2,3:4,4:5,5:7,6:9,7:11,8:0,9:2,11:5,13:9};
+                let interval;
                 let namedPc = null;
-                if (interval === undefined) {
-                    const noteMatch = raw.match(/^([A-Ga-g])([#b]?)$/);
-                    if (!noteMatch) { setCustomToneError(lang==='zh'?'請輸入 A–G 音名（可加 #／b）或 2、4、6、9、11、13。':'Enter A–G (optional #/b), or 2, 4, 6, 9, 11, 13.'); return; }
+                const noteMatch = raw.match(/^([A-Ga-g])([#b]?)$/);
+                const degreeMatch = raw.match(/^([b#]?)(1|2|3|4|5|6|7|8|9|11|13)$/i);
+                if (noteMatch) {
                     const spelling = `${noteMatch[1].toUpperCase()}${noteMatch[2]}`;
                     const canonical = NOTE_ALIASES[spelling.toUpperCase()] || spelling;
                     namedPc = NOTES_C.indexOf(canonical);
                     if (namedPc < 0) { setCustomToneError(lang==='zh'?'無法辨識此音名。':'This note name is not recognized.'); return; }
-                    interval = (namedPc - NOTES_C.indexOf(simRoot) + 12) % 12;
+                    interval = (namedPc - rootPc + 12) % 12;
+                } else if (degreeMatch) {
+                    const alteration = degreeMatch[1] === 'b' ? -1 : degreeMatch[1] === '#' ? 1 : 0;
+                    interval = (scaleIntervals[degreeMatch[2]] + alteration + 12) % 12;
+                } else {
+                    setCustomToneError(lang==='zh'?'請輸入 A–G 音名（可加 #／b）或音級／音程，例如 3、♭3、#4、9、11、13。':'Enter an A–G note (optional #/b), or a degree/interval such as 3, b3, #4, 9, 11, or 13.');
+                    return;
                 }
-                const actualPc = (OPEN_S[Number(customString)] + Number(customFret)) % 12;
-                const expectedPc = (NOTES_C.indexOf(simRoot) + interval) % 12;
-                if (actualPc !== expectedPc || (namedPc !== null && namedPc !== actualPc)) { setCustomToneError(lang==='zh'?`第 ${customString} 弦第 ${customFret} 格不是指定的 ${raw || DEG_L[interval]}。`:`String ${customString}, fret ${customFret} does not match ${raw || DEG_L[interval]}.`); return; }
                 if (simulatorBase.intervals.includes(interval)) { setCustomToneError(lang==='zh'?'這個音已包含在基礎和弦中。':'This tone is already in the base chord.'); return; }
-                setSimAdditions(current=>current.includes(interval)?current:[...current.slice(-1),interval]);
-                setCustomToneDot({string:Number(customString),fret:Number(customFret),pc:actualPc,note:NOTES_C[actualPc],degree:DEG_L[interval],isRoot:interval===0,interval});
-                setCustomToneError(''); notify(lang==='zh'?'已加入自訂加音':'Custom tone added');
+                const nextAdditions = simAdditions.includes(interval) ? simAdditions : [...simAdditions.slice(-1),interval];
+                const nextChord = addNoteChord(simulatorBase, nextAdditions);
+                const candidates = generateVoicings(rootPc, nextChord, [6,5,4,3], true, true);
+                const preview = candidates.find(voicing => voicing.some(note => note.interval === interval)) || candidates[0] || [];
+                if (!preview.length) { setCustomToneError(lang==='zh'?'目前的和弦找不到可演奏的自動加音指法；請改用其他音或開啟詳細頁選擇不同琴弦。':'No playable automatic voicing was found for this addition. Try another note or choose different strings in the detail view.'); return; }
+                setSimAdditions(nextAdditions);
+                setCustomTonePreview(preview);
+                setCustomToneError('');
+                notify(lang==='zh'?`已加入 ${namedPc !== null ? NOTES_C[namedPc] : raw}，並找到可用指法`:`Added ${namedPc !== null ? NOTES_C[namedPc] : raw} and found a playable voicing`);
             };
-            const resetCustomTone = () => { setCustomTone(''); setCustomToneError(''); setCustomToneDot(null); setSimAdditions([]); };
+            const resetCustomTone = () => { setCustomTone(''); setCustomToneError(''); setCustomTonePreview([]); setSimAdditions([]); };
             const notify = (message, type='success') => {
                 setNotice({message,type,id:Date.now()});
                 window.setTimeout(()=>setNotice(current=>current?.message===message ? null : current), 2400);
@@ -948,11 +946,11 @@
                             <h2>{lang==='zh'?'以既有和弦為基礎，加入一或兩個音':'Start with a chord, then add one or two notes'}</h2>
                             <p>{lang==='zh'?'系統會先辨識原和弦，再依新增音給出常用名稱、實際音組與可演奏指法。':'The system identifies the base chord first, then names the result and finds playable guitar voicings.'}</p>
                             <div className="simulator-grid">
-                                <div className="sim-step"><span>01</span><label>{lang==='zh'?'選擇根音':'Choose root'}</label><div className="root-pills">{NOTES_C.map(note=><button key={note} onClick={()=>setSimRoot(note)} className={simRoot===note?'selected':''}>{note}</button>)}</div></div>
-                                <div className="sim-step"><span>02</span><label>{lang==='zh'?'選擇基礎和弦':'Choose base chord'}</label><select value={simBaseId} onChange={e=>{setSimBaseId(e.target.value);setSimAdditions([]);}}>{baseChoices.map(id=>{const item=db.ch.CHORD_TYPES.find(ch=>ch.id===id); return <option key={id} value={id}>{simRoot}{item.label || 'Major'} — {lang==='zh'?item.zh:item.en}</option>})}</select></div>
+                                <div className="sim-step"><span>01</span><label>{lang==='zh'?'選擇根音':'Choose root'}</label><div className="root-pills">{NOTES_C.map(note=><button key={note} onClick={()=>{setSimRoot(note);setCustomTonePreview([]);setCustomToneError('');}} className={simRoot===note?'selected':''}>{note}</button>)}</div></div>
+                                <div className="sim-step"><span>02</span><label>{lang==='zh'?'選擇基礎和弦':'Choose base chord'}</label><select value={simBaseId} onChange={e=>{setSimBaseId(e.target.value);setSimAdditions([]);setCustomTonePreview([]);setCustomToneError('');}}>{baseChoices.map(id=>{const item=db.ch.CHORD_TYPES.find(ch=>ch.id===id); return <option key={id} value={id}>{simRoot}{item.label || 'Major'} — {lang==='zh'?item.zh:item.en}</option>})}</select></div>
                                  <div className="sim-step"><span>03</span><label>{lang==='zh'?'加入一或兩個音':'Add one or two notes'}</label><div className="add-tone-pills">{ADDABLE_TONES.map(tone=>{const exists=simulatorBase.intervals.includes(tone.interval); const selected=simAdditions.includes(tone.interval); return <button key={tone.symbol} disabled={exists} onClick={()=>toggleAddition(tone.interval)} className={selected?'selected':''}>{tone.symbol}<small>{exists ? (lang==='zh'?'已包含':'included') : (lang==='zh'?tone.zh:tone.en)}</small></button>})}</div></div>
                              </div>
-                            <div className="custom-add-tone"><div><span>04</span><h3>{lang==='zh'?'自訂加音':'Custom add-note'}</h3><p>{lang==='zh'?'輸入 A–G（可含 #／b）或 2、4、6、9、11、13；系統會核對指定琴弦與琴格。':'Enter A–G (with optional #/b) or 2, 4, 6, 9, 11, 13. The selected string and fret are validated.'}</p></div><label>{lang==='zh'?'音名／音程':'Note / interval'}<input value={customTone} onChange={event=>setCustomTone(event.target.value)} placeholder="A, Bb, #11, 9"/></label><label>{lang==='zh'?'琴弦':'String'}<select value={customString} onChange={event=>setCustomString(event.target.value)}>{[6,5,4,3,2,1].map(string=><option key={string} value={string}>{string}</option>)}</select></label><label>{lang==='zh'?'琴格':'Fret'}<input type="number" min="0" max="24" value={customFret} onChange={event=>setCustomFret(Math.max(0,Math.min(24,Number(event.target.value))))}/></label><button type="button" onClick={addCustomTone}>{lang==='zh'?'驗證並加入':'Validate & add'}</button><button type="button" onClick={resetCustomTone}>{lang==='zh'?'還原原始和弦':'Reset base chord'}</button>{customToneError&&<div className="custom-tone-error" role="alert">{customToneError}</div>}{customToneDot&&<div className="custom-tone-preview"><Fretboard dots={[customToneDot]} disp="note" ariaLabel="Custom added note"/></div>}</div>
+                            <div className="custom-add-tone"><div><span>04</span><h3>{lang==='zh'?'智慧自訂加音':'Smart add-note'}</h3><p>{lang==='zh'?'只要輸入音名或音級；系統會依目前和弦自動找到容易按奏的琴弦與琴格。':'Enter only a note or degree. The system finds a playable string and fret from the current chord.'}</p></div><label>{lang==='zh'?'音名／音級':'Note / degree'}<input value={customTone} onChange={event=>setCustomTone(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();addCustomTone();}}} placeholder="A, Bb, 3, ♭3, #4, 9"/></label><button type="button" onClick={addCustomTone}>{lang==='zh'?'自動加入':'Add automatically'}</button><button type="button" onClick={resetCustomTone}>{lang==='zh'?'還原':'Reset'}</button>{customToneError&&<div className="custom-tone-error" role="alert">{customToneError}</div>}<div className="custom-tone-preview"><Fretboard dots={customTonePreview.length ? customTonePreview : simulatedPreviewDots} disp="note" ariaLabel="Smart add-note voicing"/><small>{lang==='zh'?(customTonePreview.length?'已依目前和弦找出可演奏位置；可在「查看指法」中改用其他把位或琴弦。':'預覽會隨快速加音與自訂加音同步更新。'):(customTonePreview.length?'A playable position was found. Open voicings to choose other positions or strings.':'The preview updates with both quick and custom additions.')}</small></div></div>
                             <div className="builder-preview">
                                 <span>{lang==='zh'?'分析結果':'Analysis'}</span>
                                 <strong>{simRoot}{simulatedChord.label}</strong>
