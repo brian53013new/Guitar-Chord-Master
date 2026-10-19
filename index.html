@@ -310,7 +310,6 @@
         ];
 
         const THEME_STORAGE_KEY = 'guitar-advisor-theme';
-        const UPDATE_NOTICE_STORAGE_KEY = 'guitar-advisor-update-notice-v1';
         const THEME_OPTIONS = [
             {id:'classic', zh:'經典風格', en:'Classic'},
             {id:'dark-professional', zh:'深色專業', en:'Dark Professional'},
@@ -320,15 +319,23 @@
             {id:'forest-green', zh:'森林綠', en:'Forest Green'}
         ];
 
-        // Prepared release metadata. It remains a draft and is intentionally not auto-shown
-        // until the owner approves an official release.
+        // Shared release schema. Drafts are visible only in authenticated preview/dev builds;
+        // the public site will not auto-announce them before approval.
         const RELEASE_DIGEST = {
-            siteId:'guitar-advisor', siteName:'吉他顧問', version:'1.1.0', releasedAt:null, status:'draft',
-            summary:'互動指板、收藏、瀏覽、比較與轉調功能的向下相容擴充。',
-            highlights:['收藏和弦與最近瀏覽','指法比較與轉調對照','智慧把位互動指板與實際按弦練習'],
-            improvements:['既有和弦資料與指法生成共用於新增工具'], fixes:[],
+            siteId:'guitar-helper-gm', siteName:'吉他幫手 GM', version:'1.1.0', releasedAt:null, status:'draft',
+            summary:'重新整理和弦資料與指法工作流程，讓搜尋、比較、轉調、加音與爵士無根音排列共用一致的互動指板。',
+            highlights:['和弦分類、名稱與音程分析更一致','Rootless Voicing 與六弦發聲條件控制','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
+            improvements:['大型指法切換控制與即時狀態回饋','手機版觸控操作與智慧把位範圍','加音模擬器支援自訂音名、音程、琴弦與琴格'],
+            fixes:['移除聽辨選擇題與答題統計的舊狀態流程'],
             officialReleaseUrl:'https://brian53013new.github.io/Brian-Code-Official-website/'
         };
+        const UPDATE_NOTICE_STORAGE_KEY = `guitar-helper-gm-update-${RELEASE_DIGEST.version}`;
+        const IS_RELEASE_PREVIEW = RELEASE_DIGEST.status === 'draft' && (
+            new URLSearchParams(window.location.search).get('previewRelease') === '1' ||
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ||
+            window.location.hostname.endsWith('.chatgpt.site')
+        );
+        const SHOULD_SHOW_RELEASE = RELEASE_DIGEST.status === 'published' || IS_RELEASE_PREVIEW;
 
         const readLocal = (key, fallback = null) => {
             try { return localStorage.getItem(key) || fallback; } catch (_) { return fallback; }
@@ -420,32 +427,36 @@
         const spellPc = (pc, preferFlats = false) => (preferFlats ? NOTE_FLATS : NOTES_C)[(pc+12)%12];
 
         const UpdateNotice = ({ lang, closing, onDismiss }) => {
+            const closeRef = useRef(null);
+            useEffect(() => {
+                closeRef.current?.focus();
+                const onKeyDown = event => { if (event.key === 'Escape') onDismiss(); };
+                window.addEventListener('keydown', onKeyDown);
+                return () => window.removeEventListener('keydown', onKeyDown);
+            }, [onDismiss]);
             const items = lang === 'zh' ? [
-                '和弦分類已重新整理，名稱、音程與和聲功能更一致。',
-                '六和弦、七和弦與九和弦資料庫已擴充，並移除重複音組與不穩定命名。',
-                '主要選單已移除 add 類和弦；加音功能集中至和弦加音模擬器。',
-                '爵士色彩和弦分類已移除；Half-Diminished、Sus2 與 Sus4 均保留。',
-                '加入爵士無根音排列、六條琴弦自由選擇與可演奏性篩選。',
-                '友好模式、根音控制、指法排序、吉他／鋼琴試聽與基本樂理頁面均已優化。'
+                '和弦分類、名稱、組成音與音程分析更一致。',
+                '新增 Rootless Voicing、六弦條件與友好模式指法篩選。',
+                '多重和弦查詢整合排序、轉調、移調夾與完整指法。',
+                '收藏、最近瀏覽、指法比較與六種風格可持久保存。'
             ] : [
-                'Chord categories have been reorganized for more consistent names, intervals, and harmonic roles.',
-                'Sixth, seventh, and ninth chord libraries were expanded while duplicate pitch sets and unstable labels were removed.',
-                'Add chords were removed from the main menu and are now handled by the Add-Note Simulator.',
-                'The Jazz Color Chords category was removed; Half-Diminished, Sus2, and Sus4 remain available.',
-                'Jazz rootless voicings, free six-string selection, and playability filtering are included.',
-                'Friendly mode, root control, voicing order, guitar/piano playback, and the music-theory page were refined.'
+                'Chord categories, names, pitch sets, and interval analysis are more consistent.',
+                'Rootless voicings, six-string conditions, and friendly playability filters are included.',
+                'Multi-chord query combines ordering, transposition, capo, and complete voicing controls.',
+                'Favorites, recent history, comparison, and six visual styles persist in your browser.'
             ];
             return (
                 <div className={`update-notice ${closing ? 'closing' : ''}`} onClick={onDismiss}>
-                    <section className="update-notice-card" aria-modal="true" role="dialog" aria-labelledby="update-notice-title">
-                        <button type="button" className="update-notice-close" aria-label={lang==='zh'?'關閉公告':'Close notice'}>×</button>
-                        <div className="update-notice-eyebrow">Brian&amp;Code · 2026</div>
-                        <h2 id="update-notice-title">{lang==='zh'?'網站更新公告':'Website Update Notice'}</h2>
-                        <p>{lang==='zh'?'本次更新已完成。點擊畫面任意位置即可開始探索。':'This update is ready. Click anywhere to begin exploring.'}</p>
+                    <section className="update-notice-card" aria-modal="true" role="dialog" aria-labelledby="update-notice-title" aria-describedby="update-notice-summary">
+                        <button ref={closeRef} type="button" className="update-notice-close" onClick={onDismiss} aria-label={lang==='zh'?'稍後再看':'View later'}>×</button>
+                        <div className="update-notice-eyebrow">{RELEASE_DIGEST.siteName} · v{RELEASE_DIGEST.version}</div>
+                        <div className={`update-notice-status ${RELEASE_DIGEST.status}`}>{lang==='zh'?'草稿預覽｜日期待公布':'Draft preview · Date pending'}</div>
+                        <h2 id="update-notice-title">{lang==='zh'?'更新懶人包':'What’s new'}</h2>
+                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:'A unified guitar workflow for chord data, practical voicings, multi-chord lookup, and personal tools.'}</p>
                         <ul className="update-notice-list">{items.map(item=><li key={item}>{item}</li>)}</ul>
                         <div className="update-notice-footer">
-                            <span>{lang==='zh'?'查看完整更新紀錄，請前往 Brian Code 官方網站。':'For the complete update record, visit the Brian Code official website.'}</span>
-                            <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'查看完整更新紀錄':'View full update record'}</a>
+                            <span>{lang==='zh'?'目前待 PR 審核，尚未正式合併發布。':'Awaiting PR review; not yet released.'}</span>
+                            <a href={RELEASE_DIGEST.officialReleaseUrl} target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'到官方網站看完整更新':'View official updates'}</a>
                         </div>
                     </section>
                 </div>
@@ -680,7 +691,7 @@
                 return THEME_OPTIONS.some(option=>option.id===saved) ? saved : 'classic';
             });
             const [stylePanelOpen, setStylePanelOpen] = useState(false);
-            const [showUpdateNotice, setShowUpdateNotice] = useState(() => readLocal(UPDATE_NOTICE_STORAGE_KEY) !== 'read');
+            const [showUpdateNotice, setShowUpdateNotice] = useState(() => SHOULD_SHOW_RELEASE && readLocal(UPDATE_NOTICE_STORAGE_KEY) !== 'read');
             const [closingUpdateNotice, setClosingUpdateNotice] = useState(false);
             const [libraryQuery, setLibraryQuery] = useState('');
             const [simRoot, setSimRoot] = useState('C');
@@ -1064,6 +1075,7 @@
                         </div>
                         <div className="feature-nav" aria-label={lang==='zh'?'個人工具':'Personal tools'}>
                             {[['favorites',lang==='zh'?'我的收藏':'Favorites'],['recent',lang==='zh'?'最近瀏覽':'Recent'],['compare',lang==='zh'?'指法比較':'Compare'],['practice',lang==='zh'?'練習模式':'Practice'],['transpose',lang==='zh'?'多重和弦查詢':'Multi-Chord Query']].map(([id,label])=><button key={id} onClick={()=>{setMode(id);setCatId(null);setTypeObj(null);}} className={mode===id?'active':''}>{label}{id==='compare'&&compareItems.length>0?<sup>{compareItems.length}</sup>:null}</button>)}
+                            {SHOULD_SHOW_RELEASE && <button type="button" onClick={()=>{setClosingUpdateNotice(false);setShowUpdateNotice(true);}}>{lang==='zh'?'更新懶人包':'What’s new'}</button>}
                         </div>
                     </header>
                     <main>{renderMain()}</main>
