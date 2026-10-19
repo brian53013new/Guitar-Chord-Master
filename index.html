@@ -434,16 +434,11 @@
                 window.addEventListener('keydown', onKeyDown);
                 return () => window.removeEventListener('keydown', onKeyDown);
             }, [onDismiss]);
-            const items = lang === 'zh' ? [
-                '和弦分類、名稱、組成音與音程分析更一致。',
-                '新增 Rootless Voicing、六弦條件與友好模式指法篩選。',
-                '多重和弦查詢整合排序、轉調、移調夾與完整指法。',
-                '收藏、最近瀏覽、指法比較與六種風格可持久保存。'
-            ] : [
+            const items = lang === 'zh' ? RELEASE_DIGEST.highlights : [
                 'Chord categories, names, pitch sets, and interval analysis are more consistent.',
-                'Rootless voicings, six-string conditions, and friendly playability filters are included.',
-                'Multi-chord query combines ordering, transposition, capo, and complete voicing controls.',
-                'Favorites, recent history, comparison, and six visual styles persist in your browser.'
+                'Six independent include/exclude string toggles replace multi-state string conditions.',
+                'A compact one-row chord action bar keeps playback, display, voicing, save, and compare close at hand.',
+                'Enter a note name or scale degree and Smart Add-note finds a playable guitar position.'
             ];
             return (
                 <div className={`update-notice ${closing ? 'closing' : ''}`} onClick={onDismiss}>
@@ -452,7 +447,7 @@
                         <div className="update-notice-eyebrow">{RELEASE_DIGEST.siteName} · v{RELEASE_DIGEST.version}</div>
                         <div className={`update-notice-status ${RELEASE_DIGEST.status}`}>{lang==='zh'?'草稿預覽｜日期待公布':'Draft preview · Date pending'}</div>
                         <h2 id="update-notice-title">{lang==='zh'?'更新懶人包':'What’s new'}</h2>
-                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:'A unified guitar workflow for chord data, practical voicings, multi-chord lookup, and personal tools.'}</p>
+                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:'A simpler chord workflow with string toggles, compact controls, and smart playable add-notes.'}</p>
                         <ul className="update-notice-list">{items.map(item=><li key={item}>{item}</li>)}</ul>
                         <div className="update-notice-footer">
                             <span>{lang==='zh'?'目前待 PR 審核，尚未正式合併發布。':'Awaiting PR review; not yet released.'}</span>
