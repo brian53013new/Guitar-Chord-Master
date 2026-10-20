@@ -44,7 +44,7 @@
       }
     </script>
     <script type="text/babel" data-presets="react-classic,env">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         /* 音訊引擎 */
         const MIDI_OPEN = {6:40, 5:45, 4:50, 3:55, 2:59, 1:64};
@@ -211,51 +211,35 @@
             }).slice(0,48);
         };
 
-        /* 指板板塊 - 精確對齊版 */
-        const Fretboard = ({ dots, disp, instrument = 'guitar' }) => (
-            <div className="fretboard-frame animate-in">
-                <div className="string-labels-side">
-                    {[1,2,3,4,5,6].map(s => <div key={s} className="string-tag">{s === 1 ? '1st' : s === 6 ? '6th' : `${s}`}</div>)}
-                </div>
-                <div className="flex flex-col">
-                    <div className="fret-grid-master">
-                        {/* 琴枕 */}
-                        <div className="fret-col nut">
-                            {[1,2,3,4,5,6].map(s => (
-                                <div key={s} className="fret-space">
-                                    {dots.filter(d=>d.string===s && d.fret===0).map((d,idx) => (
-                                        <div key={idx} className={`note-orb ${d.isRoot?'root':''}`} onClick={()=>playNotes([d],instrument)}>
-                                            {disp==='note' ? d.note : d.degree}
-                                        </div>
-                                    ))}
-                                </div>
-                            ))}
+        /* Shared interactive fretboard. Chord voicings focus on their actual position;
+           scales and arpeggios retain the full 24-fret view. */
+        const Fretboard = ({ dots = [], disp = 'note', instrument = 'guitar', full = false, ariaLabel = 'Guitar fretboard' }) => {
+            const [selected, setSelected] = useState(null);
+            const fretted = dots.map(dot=>dot.fret).filter(fret=>fret > 0);
+            const low = fretted.length ? Math.min(...fretted) : 1;
+            const high = fretted.length ? Math.max(...fretted) : 5;
+            const startFret = full ? 1 : Math.max(1, low - 1);
+            const endFret = full ? 24 : Math.min(24, Math.max(startFret + 3, high + 1));
+            const displayedFrets = Array.from({length:endFret-startFret+1},(_,index)=>startFret+index);
+            const selectNote = note => { setSelected(note); playNotes([note], instrument); };
+            const renderNote = note => note && <button type="button" className={`note-orb ${note.isRoot?'root':''} ${selected===note?'selected':''}`} onClick={()=>selectNote(note)} aria-label={`${note.note}, ${note.degree}, string ${note.string}, fret ${note.fret}`} title={`${note.note} · ${note.degree} · ${note.string}弦 ${note.fret}格`}>
+                {disp==='note' ? note.note : note.degree}
+            </button>;
+            return <div className={`interactive-fretboard ${full?'is-full':'is-positioned'}`} aria-label={ariaLabel}>
+                <div className="fretboard-frame animate-in" tabIndex="0">
+                    <div className="string-labels-side">{[1,2,3,4,5,6].map(string=><div key={string} className="string-tag">{string === 1 ? '1st' : string === 6 ? '6th' : string}</div>)}</div>
+                    <div className="fretboard-scroll">
+                        <div className="fret-grid-master">
+                            <div className="fret-col nut" aria-label="Open strings">{[1,2,3,4,5,6].map(string=><div key={string} className="fret-space">{renderNote(dots.find(dot=>dot.string===string && dot.fret===0))}</div>)}</div>
+                            {displayedFrets.map(fret=><div key={fret} className="fret-col">{[3,5,7,9,12,15,17,19,21,24].includes(fret) && <div className="inlay-dot"/>}{[1,2,3,4,5,6].map(string=><div key={string} className="fret-space">{renderNote(dots.find(dot=>dot.string===string && dot.fret===fret))}</div>)}</div>)}
                         </div>
-                        {/* 品格 1-24 */}
-                        {Array.from({length: 24}).map((_, f) => {
-                            const fret = f + 1;
-                            return (
-                                <div key={fret} className="fret-col">
-                                    {[3,5,7,9,12,15,17,19,21,24].includes(fret) && <div className="inlay-dot"></div>}
-                                    {[1,2,3,4,5,6].map(s => (
-                                        <div key={s} className="fret-space">
-                                            {dots.filter(d=>d.string===s && d.fret===fret).map((d,idx) => (
-                                                <div key={idx} className={`note-orb ${d.isRoot?'root':''}`} onClick={()=>playNotes([d],instrument)}>
-                                                    {disp==='note' ? d.note : d.degree}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div className="fret-nums-bar">
-                        {Array.from({length: 24}).map((_, i) => <div key={i} className="fret-n">{i+1}</div>)}
+                        <div className="fret-nums-bar"><div className="fret-n nut-number">0</div>{displayedFrets.map(fret=><div key={fret} className="fret-n">{fret}</div>)}</div>
                     </div>
                 </div>
-            </div>
-        );
+                <div className="fretboard-meta"><span>{full ? '1–24 fret range' : `${startFret}–${endFret} fret position`}</span><span>{dots.filter(dot=>dot.fret===0).length ? `Open strings: ${dots.filter(dot=>dot.fret===0).map(dot=>dot.string).join(', ')}` : 'No open strings'}</span></div>
+                {selected && <div className="fretboard-note-detail" role="status"><b>{selected.note}</b><span>{selected.degree} · {selected.string} {selected.string===1?'st':selected.string===2?'nd':selected.string===3?'rd':'th'} string · fret {selected.fret}</span><small>Click plays this note</small></div>}
+            </div>;
+        };
 
         const NOTE_ALIASES = {DB:'C#', EB:'D#', GB:'F#', AB:'G#', BB:'A#', CB:'B', FB:'E', 'E#':'F', 'B#':'C'};
         const CUSTOM_BASES = [
@@ -326,7 +310,6 @@
         ];
 
         const THEME_STORAGE_KEY = 'guitar-advisor-theme';
-        const UPDATE_NOTICE_STORAGE_KEY = 'guitar-advisor-update-notice-v1';
         const THEME_OPTIONS = [
             {id:'classic', zh:'經典風格', en:'Classic'},
             {id:'dark-professional', zh:'深色專業', en:'Dark Professional'},
@@ -336,6 +319,24 @@
             {id:'forest-green', zh:'森林綠', en:'Forest Green'}
         ];
 
+        // Shared release schema. Drafts are visible only in authenticated preview/dev builds;
+        // the public site will not auto-announce them before approval.
+        const RELEASE_DIGEST = {
+            siteId:'guitar-helper-gm', siteName:'吉他幫手 GM', version:'1.2.0', releasedAt:null, status:'draft',
+            summary:'琴弦與指法控制更直覺，自訂加音會自動尋找可演奏位置，讓和弦探索更快速。',
+            summaryEn:'String and voicing controls are simpler, and custom additions now find playable positions automatically.',
+            highlights:['和弦分類、名稱與音程分析更一致','六弦包含／排除切換','單行圖示化和弦操作列','輸入音名或音級即可自動找加音指法'],
+            improvements:['加音預覽、替換把位與互動指板使用同一套指法資料','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
+            fixes:['移除詳細頁過度複雜的必須／靜音琴弦限制','移除聽辨選擇題與答題統計的舊狀態流程'],
+            officialReleaseUrl:'./updates.html'
+        };
+        const UPDATE_NOTICE_STORAGE_KEY = `guitar-helper-gm-update-${RELEASE_DIGEST.version}`;
+        const IS_RELEASE_PREVIEW = RELEASE_DIGEST.status === 'draft' && (
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ||
+            window.location.hostname.endsWith('.chatgpt.site')
+        );
+        const SHOULD_SHOW_RELEASE = RELEASE_DIGEST.status === 'published' || IS_RELEASE_PREVIEW;
+
         const readLocal = (key, fallback = null) => {
             try { return localStorage.getItem(key) || fallback; } catch (_) { return fallback; }
         };
@@ -343,33 +344,127 @@
             try { localStorage.setItem(key, value); } catch (_) {}
         };
 
+        const FAVORITES_STORAGE_KEY = 'guitar-advisor-favorites-v1';
+        const RECENTS_STORAGE_KEY = 'guitar-advisor-recents-v1';
+        const MAX_RECENTS = 24;
+        const readJson = (key, fallback) => {
+            try { const parsed = JSON.parse(localStorage.getItem(key) || ''); return parsed ?? fallback; } catch (_) { return fallback; }
+        };
+        const formatViewedAt = (value, lang) => {
+            if (!value) return '';
+            const diff = Math.max(0, Date.now() - new Date(value).getTime());
+            const minutes = Math.floor(diff / 60000);
+            if (minutes < 1) return lang==='zh' ? '剛剛' : 'Just now';
+            if (minutes < 60) return lang==='zh' ? `${minutes} 分鐘前` : `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return lang==='zh' ? `${hours} 小時前` : `${hours}h ago`;
+            return new Date(value).toLocaleDateString(lang==='zh'?'zh-TW':'en-US');
+        };
+        const voicingKey = (root, typeId, dots, capo = 0) => `${root}|${typeId}|${capo}|${[...dots].sort((a,b)=>b.string-a.string).map(n=>`${n.string}:${n.fret}`).join(',')}`;
+        const voicingPosition = dots => {
+            const frets = dots.map(n=>n.fret).filter(f=>f>0);
+            return frets.length ? Math.min(...frets) : 0;
+        };
+        const analyzeVoicing = dots => {
+            const activeStrings = [...new Set(dots.map(n=>n.string))].sort((a,b)=>b-a);
+            const frets = dots.map(n=>n.fret).filter(f=>f>0);
+            const span = frets.length ? Math.max(...frets) - Math.min(...frets) : 0;
+            const atFret = frets.reduce((map,f)=>({ ...map, [f]:(map[f]||0)+1 }),{});
+            const barreFret = Object.entries(atFret).map(([f,count])=>({f:Number(f),count})).find(item=>item.count>=2);
+            const score = span + (barreFret ? 2 : 0) + (activeStrings.length>=5 ? 1 : 0);
+            const difficulty = score <= 2 ? 'Easy' : score <= 5 ? 'Medium' : 'Advanced';
+            return {
+                activeStrings, mutedStrings:[6,5,4,3,2,1].filter(s=>!activeStrings.includes(s)), span,
+                openCount:dots.filter(n=>n.fret===0).length, barreFret:barreFret?.f || null, difficulty,
+                guide:barreFret ? `Index barre suggested at fret ${barreFret.f}` : 'One finger per distinct fretted position'
+            };
+        };
+        const buildVoicingRecord = (root, typeObj, dots, capo = 0) => {
+            const analysis = analyzeVoicing(dots);
+            return {
+                key:voicingKey(root,typeObj.id,dots,capo), root, typeId:typeObj.id, label:typeObj.label || '',
+                zh:typeObj.zh, en:typeObj.en, formula:typeObj.formula, intervals:typeObj.intervals, dots,
+                position:voicingPosition(dots), capo, analysis, viewedAt:new Date().toISOString(), savedAt:new Date().toISOString()
+            };
+        };
+        const VoicingThumbnail = ({ item, dots: passedDots }) => <Fretboard dots={passedDots || item?.dots || []} disp="note" ariaLabel={`${item?.root || ''}${item?.label || ''} fretboard`}/>;
+        const midiForPitchClass = (pc, octave = 4) => 12 * (octave + 1) + pc;
+        const playMidiTones = (midis, instrument = 'piano', simultaneous = false) => {
+            const ctx = getAudioContext();
+            const now = ctx.currentTime;
+            midis.forEach((midi,index)=>{
+                const frequency = 440 * Math.pow(2,(midi-69)/12);
+                const start = now + (simultaneous ? 0 : index * .52);
+                if (instrument === 'guitar') pluckGuitar(ctx,frequency,start,.64);
+                else strikePiano(ctx,frequency,start,.62);
+            });
+        };
+        const playChordIntervals = (rootPc, intervals, instrument = 'piano') => {
+            const midis = [...new Set(intervals)].sort((a,b)=>a-b).map(interval=>midiForPitchClass((rootPc+interval)%12, interval>=9 ? 5 : 4));
+            playMidiTones(midis,instrument,true);
+        };
+        const estimatePitch = (samples, sampleRate) => {
+            let rms = 0; for (let i=0;i<samples.length;i++) rms += samples[i]*samples[i];
+            if (Math.sqrt(rms/samples.length) < .012) return null;
+            const minLag=Math.floor(sampleRate/1000), maxLag=Math.floor(sampleRate/70); let bestLag=0,best=-1;
+            for(let lag=minLag;lag<Math.min(maxLag,samples.length/2);lag++) { let sum=0; for(let i=0;i<samples.length-lag;i++) sum+=samples[i]*samples[i+lag]; if(sum>best){best=sum;bestLag=lag;} }
+            return bestLag ? sampleRate/bestLag : null;
+        };
+        const NOTE_FLATS = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+        const parseChordSymbol = (symbol, chordTypes) => {
+            const match = symbol.trim().match(/^([A-Ga-g])([#b]?)(.*)$/);
+            if (!match) return null;
+            const rootName = `${match[1].toUpperCase()}${match[2]}`;
+            const aliases = {Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#',Cb:'B',Fb:'E','E#':'F','B#':'C'};
+            const canonical = aliases[rootName] || rootName;
+            const rootPc = NOTES_C.indexOf(canonical);
+            if (rootPc < 0) return null;
+            const suffix = match[3] || '';
+            const normalized = suffix.replace(/[Δ]/g,'maj').toLowerCase();
+            const type = chordTypes.find(item=>item.label.toLowerCase()===normalized) || (normalized==='' ? chordTypes.find(item=>item.id==='Maj') : null);
+            return type ? {rootPc, rootName, suffix, type, preferFlats:match[2]==='b'} : null;
+        };
+        const spellPc = (pc, preferFlats = false) => (preferFlats ? NOTE_FLATS : NOTES_C)[(pc+12)%12];
+
         const UpdateNotice = ({ lang, closing, onDismiss }) => {
-            const items = lang === 'zh' ? [
-                '和弦分類已重新整理，名稱、音程與和聲功能更一致。',
-                '六和弦、七和弦與九和弦資料庫已擴充，並移除重複音組與不穩定命名。',
-                '主要選單已移除 add 類和弦；加音功能集中至和弦加音模擬器。',
-                '爵士色彩和弦分類已移除；Half-Diminished、Sus2 與 Sus4 均保留。',
-                '加入爵士無根音排列、六條琴弦自由選擇與可演奏性篩選。',
-                '友好模式、根音控制、指法排序、吉他／鋼琴試聽與基本樂理頁面均已優化。'
-            ] : [
-                'Chord categories have been reorganized for more consistent names, intervals, and harmonic roles.',
-                'Sixth, seventh, and ninth chord libraries were expanded while duplicate pitch sets and unstable labels were removed.',
-                'Add chords were removed from the main menu and are now handled by the Add-Note Simulator.',
-                'The Jazz Color Chords category was removed; Half-Diminished, Sus2, and Sus4 remain available.',
-                'Jazz rootless voicings, free six-string selection, and playability filtering are included.',
-                'Friendly mode, root control, voicing order, guitar/piano playback, and the music-theory page were refined.'
+            const closeRef = useRef(null);
+            const dialogRef = useRef(null);
+            useEffect(() => {
+                const returnFocusTo = document.activeElement;
+                closeRef.current?.focus();
+                const onKeyDown = event => {
+                    if (event.key === 'Escape') { onDismiss(); return; }
+                    if (event.key !== 'Tab') return;
+                    const focusable = [...(dialogRef.current?.querySelectorAll('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])') || [])];
+                    if (!focusable.length) return;
+                    const first = focusable[0], last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+                };
+                window.addEventListener('keydown', onKeyDown);
+                return () => {
+                    window.removeEventListener('keydown', onKeyDown);
+                    if (returnFocusTo?.isConnected) returnFocusTo.focus();
+                };
+            }, [onDismiss]);
+            const items = lang === 'zh' ? RELEASE_DIGEST.highlights : [
+                'Chord categories, names, pitch sets, and interval analysis are more consistent.',
+                'Six independent include/exclude string toggles replace multi-state string conditions.',
+                'A compact one-row chord action bar keeps playback, display, voicing, save, and compare close at hand.',
+                'Enter a note name or scale degree and Smart Add-note finds a playable guitar position.'
             ];
             return (
                 <div className={`update-notice ${closing ? 'closing' : ''}`} onClick={onDismiss}>
-                    <section className="update-notice-card" aria-modal="true" role="dialog" aria-labelledby="update-notice-title">
-                        <button type="button" className="update-notice-close" aria-label={lang==='zh'?'關閉公告':'Close notice'}>×</button>
-                        <div className="update-notice-eyebrow">Brian&amp;Code · 2026</div>
-                        <h2 id="update-notice-title">{lang==='zh'?'網站更新公告':'Website Update Notice'}</h2>
-                        <p>{lang==='zh'?'本次更新已完成。點擊畫面任意位置即可開始探索。':'This update is ready. Click anywhere to begin exploring.'}</p>
+                    <section ref={dialogRef} className="update-notice-card" onClick={event=>event.stopPropagation()} aria-modal="true" role="dialog" aria-labelledby="update-notice-title" aria-describedby="update-notice-summary">
+                        <button ref={closeRef} type="button" className="update-notice-close" onClick={onDismiss} aria-label={lang==='zh'?'稍後再看':'View later'}>×</button>
+                        <div className="update-notice-eyebrow">{RELEASE_DIGEST.siteName} · v{RELEASE_DIGEST.version}</div>
+                        <div className={`update-notice-status ${RELEASE_DIGEST.status}`}>{lang==='zh'?'草稿預覽｜日期待公布':'Draft preview · Date pending'}</div>
+                        <h2 id="update-notice-title">{lang==='zh'?'更新懶人包':'What’s new'}</h2>
+                        <p id="update-notice-summary">{lang==='zh'?RELEASE_DIGEST.summary:RELEASE_DIGEST.summaryEn}</p>
                         <ul className="update-notice-list">{items.map(item=><li key={item}>{item}</li>)}</ul>
                         <div className="update-notice-footer">
-                            <span>{lang==='zh'?'查看完整更新紀錄，請前往 Brian Code 官方網站。':'For the complete update record, visit the Brian Code official website.'}</span>
-                            <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'查看完整更新紀錄':'View full update record'}</a>
+                            <span>{lang==='zh'?'目前待 PR 審核，尚未正式合併發布。':'Awaiting PR review; not yet released.'}</span>
+                            <a href={RELEASE_DIGEST.officialReleaseUrl} target="_blank" rel="noopener noreferrer" className="update-notice-link">{lang==='zh'?'前往吉他正式網站':'Open official guitar site'}</a>
                         </div>
                     </section>
                 </div>
@@ -411,20 +506,77 @@
             return { id:'simulated', label, zh, en, formula:additions.length ? `${base.formula}-${symbols.join('-')}` : base.formula, intervals, additions, candidates: additions.length ? [`${base.label}${symbols.map(s=>`+${s}`).join('')}`] : [] };
         };
 
-        const DetailSheet = ({ root, typeObj, mode, onClose, t, lang }) => {
+        const CollectionPage = ({ kind, items, lang, onOpen, onRemove, onClear, onFavorite, onCompare }) => {
+            const [filterRoot, setFilterRoot] = useState('all');
+            const [filterType, setFilterType] = useState('all');
+            const [order, setOrder] = useState('recent');
+            const title = kind === 'favorites' ? (lang==='zh'?'我的收藏':'My Favorites') : (lang==='zh'?'最近瀏覽':'Recently Viewed');
+            const filtered = [...items].filter(item => (filterRoot==='all'||item.root===filterRoot) && (filterType==='all'||item.label===filterType)).sort((a,b) => {
+                if(order==='root') return a.root.localeCompare(b.root);
+                if(order==='type') return a.label.localeCompare(b.label);
+                return new Date(b.savedAt || b.viewedAt) - new Date(a.savedAt || a.viewedAt);
+            });
+            const roots = [...new Set(items.map(item=>item.root))].sort();
+            const types = [...new Set(items.map(item=>item.label))].sort();
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in">
+                <div className="feature-heading"><span>{kind==='favorites'?'PERSONAL LIBRARY':'VOICING HISTORY'}</span><h2>{title}</h2><p>{kind==='favorites' ? (lang==='zh'?'收藏會保留在這個瀏覽器，可儲存同一和弦的不同把位。':'Favorites stay in this browser and can include different positions of the same chord.') : (lang==='zh'?`最多保留 ${MAX_RECENTS} 筆；再次查看相同指法只會更新時間。`:`Keeps up to ${MAX_RECENTS} entries; revisiting a voicing updates its time.`)}</p></div>
+                <div className="feature-toolbar"><select value={filterRoot} onChange={e=>setFilterRoot(e.target.value)}><option value="all">{lang==='zh'?'全部根音':'All roots'}</option>{roots.map(x=><option key={x}>{x}</option>)}</select><select value={filterType} onChange={e=>setFilterType(e.target.value)}><option value="all">{lang==='zh'?'全部類型':'All types'}</option>{types.map(x=><option key={x}>{x}</option>)}</select><select value={order} onChange={e=>setOrder(e.target.value)}><option value="recent">{lang==='zh'?'依時間':'By time'}</option><option value="root">{lang==='zh'?'依根音':'By root'}</option><option value="type">{lang==='zh'?'依類型':'By type'}</option></select>{items.length>0&&kind==='recent'&&<button className="feature-danger" onClick={onClear}>{lang==='zh'?'清除全部':'Clear all'}</button>}</div>
+                {filtered.length ? <div className="saved-grid">{filtered.map(item=><article className="saved-card" key={item.key}><button className="saved-card-main" onClick={()=>onOpen(item)}><div><strong>{item.soundingRoot || item.root}{item.label}</strong><span>{lang==='zh'?`第 ${item.position} 把位 · ${item.analysis?.difficulty || '—'}`:`Position ${item.position} · ${item.analysis?.difficulty || '—'}`}</span><small>{formatViewedAt(item.savedAt || item.viewedAt, lang)}</small></div></button><Fretboard dots={item.dots} disp="note" ariaLabel={`${item.root}${item.label} fretboard`}/><div className="saved-actions"><button onClick={()=>onCompare(item)}>{lang==='zh'?'加入比較':'Compare'}</button>{kind==='favorites'&&<button onClick={()=>onFavorite(item)}>{lang==='zh'?'取消收藏':'Remove'}</button>}<button onClick={()=>onRemove(item.key)} aria-label={lang==='zh'?'刪除':'Delete'}>×</button></div></article>)}</div> : <div className="feature-empty"><b>{lang==='zh'?'尚無資料':'Nothing here yet'}</b><p>{kind==='favorites'?(lang==='zh'?'在「具體按法」中按下收藏，即可建立自己的指法庫。':'Use the save button in a concrete voicing to build your library.'):(lang==='zh'?'開啟任何具體和弦指法後，紀錄會自動出現在這裡。':'Open a concrete voicing and it will appear here automatically.')}</p></div>}
+            </section>;
+        };
+
+        const ActionToast = ({ notice }) => notice ? <div className={`action-toast ${notice.type || 'success'}`} role="status" aria-live="polite"><span>{notice.type==='error'?'!':'✓'}</span>{notice.message}</div> : null;
+
+        const ComparePage = ({ items, lang, onOpen, onRemove }) => <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>VOICING COMPARISON</span><h2>{lang==='zh'?'指法比較':'Compare Voicings'}</h2><p>{lang==='zh'?'難度由橫按候選、品格跨度與使用弦數計算，僅作練習規劃參考，不等同唯一正確指法。':'Difficulty is a repeatable guide based on barre candidates, fret span, and sounding strings—not a claim of one exact fingering.'}</p></div>{items.length ? <div className="compare-scroll">{items.map(item=><article className="compare-card" key={item.key}><div className="compare-top"><strong>{item.soundingRoot || item.root}{item.label}</strong><button onClick={()=>onRemove(item.key)}>×</button></div><Fretboard dots={item.dots} disp="note" ariaLabel={`${item.root}${item.label} comparison fretboard`}/><dl><div><dt>{lang==='zh'?'組成音':'Tones'}</dt><dd>{item.formula}</dd></div><div><dt>{lang==='zh'?'把位':'Position'}</dt><dd>{item.position}</dd></div><div><dt>{lang==='zh'?'發聲／悶弦':'Sounding / muted'}</dt><dd>{item.analysis?.activeStrings?.length} / {item.analysis?.mutedStrings?.length}</dd></div><div><dt>{lang==='zh'?'橫按候選':'Barre candidate'}</dt><dd>{item.analysis?.barreFret ? (lang==='zh'?'可能需要':'Likely') : (lang==='zh'?'不需要':'No')}</dd></div><div><dt>{lang==='zh'?'跨度／難度':'Span / difficulty'}</dt><dd>{item.analysis?.span} · {item.analysis?.difficulty}</dd></div><div><dt>{lang==='zh'?'按弦提示':'Fingering guide'}</dt><dd>{item.analysis?.guide}</dd></div></dl><div className="saved-actions"><button onClick={()=>playNotes(item.dots,'guitar')}>{lang==='zh'?'播放':'Play'}</button><button onClick={()=>onOpen(item)}>{lang==='zh'?'查看':'Open'}</button></div></article>)}</div> : <div className="feature-empty"><b>{lang==='zh'?'比較區是空的':'Comparison is empty'}</b><p>{lang==='zh'?'從任何具體指法按下「加入比較」。':'Add concrete voicings from a chord detail view.'}</p></div>}</section>;
+
+        const PracticeMode = ({ chordTypes, lang, onNotify }) => {
+            const [feedback,setFeedback] = useState(''); const [handsType,setHandsType] = useState('Maj'); const [mic,setMic] = useState('idle'); const streamRef = useRef(null); const analyserRef = useRef(null); const audioCtxRef = useRef(null);
+            useEffect(()=>()=>{ if(streamRef.current) streamRef.current.getTracks().forEach(track=>track.stop()); },[]);
+            const requestMic = async () => { if(!navigator.mediaDevices?.getUserMedia){setMic('unsupported');return;} try {streamRef.current=await navigator.mediaDevices.getUserMedia({audio:true}); const ctx=getAudioContext(); const analyser=ctx.createAnalyser(); analyser.fftSize=2048; ctx.createMediaStreamSource(streamRef.current).connect(analyser); analyserRef.current=analyser; audioCtxRef.current=ctx; setMic('ready');}catch(e){setMic(e.name==='NotAllowedError'?'denied':'error');} };
+            const checkMicPitch = () => { const analyser=analyserRef.current; const ctx=audioCtxRef.current; if(!analyser||!ctx){setFeedback(lang==='zh'?'尚未收到可分析的麥克風輸入。':'No microphone input is available yet.');return;} const samples=new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(samples); const hz=estimatePitch(samples,ctx.sampleRate); if(!hz){setFeedback(lang==='zh'?'尚未偵測到穩定音高；請彈一條琴弦並靠近麥克風。':'No stable pitch detected. Play one string close to the microphone.');return;} const pc=((Math.round(69+12*Math.log2(hz/440))%12)+12)%12; const degree=(pc+12)%12; const targetPcs=target.intervals.map(i=>i%12); const match=targetPcs.includes(degree); setFeedback(lang==='zh'?`偵測到約 ${Math.round(hz)} Hz（${NOTES_C[pc]}）。${match?'這是目標和弦的組成音。':'這不是此 C 和弦的預期組成音。'} 音訊推測不代表手指位置。`:`Detected about ${Math.round(hz)} Hz (${NOTES_C[pc]}). ${match?'It is a chord tone.':'It is not an expected tone for this C chord.'} Audio estimation does not identify finger position.`); };
+            const target = chordTypes.find(x=>x.id===handsType) || chordTypes[0]; const targetDots = generateVoicings(0,target,[6,5,4,3],true,true)[0] || [];
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>FRETBOARD PRACTICE</span><h2>{lang==='zh'?'互動指板練習':'Interactive Fretboard Practice'}</h2><p>{lang==='zh'?'問答式聽辨已移除，避免不可靠的答案狀態。本頁保留真實吉他按弦、互動指板與可選的麥克風音高提示。':'Quiz-based ear training has been removed to avoid unreliable answer state. This page keeps real-guitar practice, the interactive fretboard, and optional microphone pitch guidance.'}</p></div><div className="practice-panel hands-panel"><div><label>{lang==='zh'?'目標和弦':'Target chord'} <select value={handsType} onChange={e=>{setHandsType(e.target.value);setFeedback('');}}>{chordTypes.filter(x=>['Maj','m','7','Maj7','m7'].includes(x.id)).map(x=><option key={x.id} value={x.id}>C{x.label || ' major'}</option>)}</select></label><button onClick={()=>{playNotes(targetDots,'guitar');onNotify?.(lang==='zh'?'正在播放目標和弦':'Playing target chord');}}>{lang==='zh'?'播放目標':'Play target'}</button></div><Fretboard dots={targetDots} disp="note" instrument="guitar" ariaLabel="Practice chord fretboard"/><p>{lang==='zh'?'在指板上點選任何音符可聽單音並查看所在琴弦、琴格與和弦度數。請依此在真實吉他按弦。':'Click any note to hear it and inspect its string, fret, and chord degree, then finger it on your guitar.'}</p><div className="saved-actions">{mic==='idle'&&<button onClick={requestMic}>{lang==='zh'?'啟用麥克風音高提示':'Enable microphone pitch guide'}</button>}{mic==='ready'&&<><button onClick={checkMicPitch}>{lang==='zh'?'檢查目前音高':'Check current pitch'}</button><span className="mic-status">{lang==='zh'?'麥克風已授權；分析的是目前音高，不會辨識手指實際位置。':'Microphone granted; analysis estimates pitch only, not finger position.'}</span></>}{['denied','unsupported','error'].includes(mic)&&<span className="mic-status error">{lang==='zh'?'麥克風無法使用，仍可直接依指板練習。':'Microphone is unavailable; you can still practise from the fretboard.'}</span>}</div>{feedback&&<div className="practice-feedback">{feedback}</div>}</div></section>;
+            /* Removed: quiz-based interval/chord ear-training, random questions, answer state, and score history.
+                {tab==='interval'&&<div className="practice-panel"><div className="feature-toolbar"><button onClick={()=>setIntervalMode(x=>x==='sequential'?'together':'sequential')}>{intervalMode==='sequential'?(lang==='zh'?'依序播放':'Sequential'):(lang==='zh'?'同時播放':'Together')}</button><button onClick={()=>playMidiTones([midiForPitchClass(0,4),midiForPitchClass(question.s,4)],'piano',intervalMode==='together')}>{lang==='zh'?'播放題目':'Play question'}</button><button onClick={()=>{setQuestion(pick(INTERVALS_FOR_PRACTICE));setFeedback('');}}>{lang==='zh'?'下一題':'Next'}</button></div><h3>{lang==='zh'?'聽兩個音的距離':'Name the interval'}</h3><div className="quiz-grid">{intervalOptions.map(x=><button key={x.s} onClick={()=>answer(x.s===question.s,'interval')}><b>{lang==='zh'?x.zh:x.en}</b></button>)}</div></div>}
+                {tab==='chord'&&<div className="practice-panel"><div className="feature-toolbar"><button onClick={()=>{setAdvanced(v=>!v);setFeedback('');}}>{advanced?(lang==='zh'?'進階：三和弦＋七和弦':'Advanced: triads + sevenths'):(lang==='zh'?'初階：大小三和弦':'Basic: major/minor')}</button><button onClick={()=>playChordIntervals(0,chordQ.intervals,'guitar')}>{lang==='zh'?'播放題目':'Play question'}</button><button onClick={askChord}>{lang==='zh'?'下一題':'Next'}</button></div><h3>{lang==='zh'?'辨識和弦類型':'Identify the chord quality'}</h3><div className="quiz-grid">{eligible.map(x=><button key={x.id} onClick={()=>answer(x.id===chordQ.id,'chord')}><b>{x.label || (lang==='zh'?'大三':'Major')}</b><small>{lang==='zh'?x.zh:x.en}</small></button>)}</div></div>}
+                {tab==='hands'&&<div className="practice-panel hands-panel"><div><label>{lang==='zh'?'目標和弦':'Target chord'} <select value={handsType} onChange={e=>setHandsType(e.target.value)}>{chordTypes.filter(x=>['Maj','m','7','Maj7','m7'].includes(x.id)).map(x=><option key={x.id} value={x.id}>C{x.label || ' major'}</option>)}</select></label><button onClick={()=>playNotes(targetDots,'guitar')}>{lang==='zh'?'播放目標':'Play target'}</button></div><VoicingThumbnail dots={targetDots}/><p>{lang==='zh'?'先依照圖在真實吉他按 C 和弦形狀，再選擇手動確認或麥克風檢查。':'Finger the displayed C-shape on your guitar, then use manual confirmation or request microphone access.'}</p><div className="saved-actions"><button onClick={()=>answer(true,'hands')}>{lang==='zh'?'我已完成（手動）':'I played it (manual)'}</button>{mic==='idle'&&<button onClick={requestMic}>{lang==='zh'?'啟用麥克風檢查':'Enable microphone check'}</button>}{mic==='ready'&&<><button onClick={checkMicPitch}>{lang==='zh'?'檢查目前音高':'Check current pitch'}</button><span className="mic-status">{lang==='zh'?'麥克風已授權；分析的是目前音高，不會辨識手指實際位置。':'Microphone granted; analysis estimates pitch only, not finger position.'}</span></>}{['denied','unsupported','error'].includes(mic)&&<span className="mic-status error">{mic==='denied'?(lang==='zh'?'你拒絕了麥克風授權，仍可使用手動模式。':'Microphone permission was denied; manual mode remains available.'):mic==='unsupported'?(lang==='zh'?'此裝置不支援麥克風功能。':'This device does not support microphone input.'):(lang==='zh'?'無法啟用麥克風，請使用手動模式。':'Microphone could not be started; use manual mode.')}</span>}</div></div>}
+                {feedback&&<div className="practice-feedback">{feedback}</div>}<div className="practice-stats"><b>{lang==='zh'?'本機練習紀錄':'Local practice record'}</b><span>{lang==='zh'?`作答 ${stats.attempts||0} 次 · 正確 ${stats.correct||0} 次 · 練習 ${Math.round((stats.totalSeconds||0)/60)} 分鐘`:`${stats.attempts||0} attempts · ${stats.correct||0} correct · ${Math.round((stats.totalSeconds||0)/60)} min`}</span><small>{lang==='zh'?((stats.wrongByType?.interval||0)>=(stats.wrongByType?.chord||0)?'建議：先複習音程，再回到和弦聽辨。':'建議：比較大、小與七和弦的三度、七度色彩。'):((stats.wrongByType?.interval||0)>=(stats.wrongByType?.chord||0)?'Suggestion: revisit intervals before chord identification.':'Suggestion: compare the 3rd and 7th colors in major, minor, and seventh chords.')}</small></div></section>;
+            */
+        };
+
+        const TransposeTool = ({ chordTypes, lang, onFavorite, onCompare, onNotify }) => {
+            const [input,setInput]=useState('Cmaj7 Dm7 G7 Cmaj7'); const [from,setFrom]=useState('C'); const [to,setTo]=useState('D'); const [capo,setCapo]=useState(0); const [shiftOverride,setShiftOverride]=useState('');
+            const shift=shiftOverride==='' ? (NOTES_C.indexOf(to)-NOTES_C.indexOf(from)+12)%12 : Number(shiftOverride);
+            const parsed=input.split(/[\s,|]+/).filter(Boolean).map(token=>parseChordSymbol(token,chordTypes)).filter(Boolean);
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>CHORD TRANSPOSITION</span><h2>{lang==='zh'?'和弦轉調工具':'Transpose Chords'}</h2><p>{lang==='zh'?'輸入空格分隔的單一和弦或進行。移調夾會讓「按奏形狀」與「實際發聲」清楚分列。':'Enter one chord or a progression separated by spaces. Capo separates the played shape from the sounding chord.'}</p></div><div className="transpose-controls"><textarea value={input} onChange={e=>setInput(e.target.value)} aria-label="Chord progression"/><label>{lang==='zh'?'原調':'From'}<select value={from} onChange={e=>setFrom(e.target.value)}>{NOTES_C.map(x=><option key={x}>{x}</option>)}</select></label><label>{lang==='zh'?'目標調':'To'}<select value={to} onChange={e=>setTo(e.target.value)}>{NOTES_C.map(x=><option key={x}>{x}</option>)}</select></label><label>{lang==='zh'?'直接半音':'Semitones'}<select value={shiftOverride} onChange={e=>setShiftOverride(e.target.value)}><option value="">{lang==='zh'?'依調性':'By key'}</option>{Array.from({length:23},(_,i)=>i-11).map(n=><option key={n} value={n}>{n>0?`+${n}`:n}</option>)}</select></label><label>{lang==='zh'?'移調夾':'Capo'}<select value={capo} onChange={e=>setCapo(Number(e.target.value))}>{Array.from({length:13},(_,i)=><option key={i} value={i}>{i}</option>)}</select></label><span>{lang==='zh'?`移動 ${shift} 個半音`:`${shift} semitones`}</span></div>{parsed.length?<div className="transpose-grid">{parsed.map((item,index)=>{const soundingPc=(item.rootPc+shift)%12; const shapePc=(soundingPc-capo+12)%12; const sounding=spellPc(soundingPc,item.preferFlats); const shape=spellPc(shapePc,item.preferFlats); const voicings=generateVoicings(shapePc,item.type,[6,5,4,3],true,true); const dots=voicings[0]||[]; const record={...buildVoicingRecord(shape,item.type,dots,capo),soundingRoot:sounding}; return <article className="transpose-card" key={`${input}-${index}`}><span>{index+1}</span><h3>{item.rootName}{item.type.label} <i>→</i> {sounding}{item.type.label}</h3><small>{capo?(lang==='zh'?`按奏：${shape}${item.type.label}（Capo ${capo}）`:`Shape: ${shape}${item.type.label} (Capo ${capo})`):(lang==='zh'?`按奏與發聲：${sounding}${item.type.label}`:`Played & sounding: ${sounding}${item.type.label}`)}</small><VoicingThumbnail dots={dots}/><div className="mini-voicings">{voicings.slice(0,3).map((v,i)=><button key={i} onClick={()=>playNotes(v,'guitar')}>{lang==='zh'?`替代把位 ${i+1}`:`Alt. ${i+1}`}</button>)}</div><div className="saved-actions"><button onClick={()=>playChordIntervals(soundingPc,item.type.intervals,'guitar')}>{lang==='zh'?'播放':'Play'}</button><button onClick={()=>onFavorite(record)}>{lang==='zh'?'收藏':'Save'}</button><button onClick={()=>onCompare(record)}>{lang==='zh'?'比較':'Compare'}</button></div></article>})}</div>:<div className="feature-empty"><b>{lang==='zh'?'找不到可辨識的和弦':'No recognizable chords'}</b><p>{lang==='zh'?'請使用例如 C、Cm、Cmaj7、Bb7、F#m7b5 的寫法。':'Try symbols such as C, Cm, Cmaj7, Bb7, or F#m7b5.'}</p></div>}</section>;
+        };
+
+        const MultiChordQuery = ({ chordTypes, lang, onOpen, onFavorite, onCompare, onNotify }) => {
+            const [symbols, setSymbols] = useState(['C','Am','F','G7']);
+            const [draft, setDraft] = useState('');
+            const [from, setFrom] = useState('C'); const [to, setTo] = useState('C'); const [shiftOverride, setShiftOverride] = useState(''); const [capo, setCapo] = useState(0);
+            const shift = shiftOverride==='' ? (NOTES_C.indexOf(to)-NOTES_C.indexOf(from)+12)%12 : Number(shiftOverride);
+            const parsed = symbols.map(symbol=>({symbol, value:parseChordSymbol(symbol,chordTypes)})).filter(item=>item.value);
+            const addSymbols = () => { const next=draft.split(/[\s,|]+/).map(item=>item.trim()).filter(Boolean); if(!next.length){onNotify?.(lang==='zh'?'請輸入至少一個和弦符號':'Enter at least one chord symbol','error');return;} const invalid=next.filter(item=>!parseChordSymbol(item,chordTypes)); if(invalid.length){onNotify?.(lang==='zh'?`無法辨識：${invalid.join(', ')}`:`Unrecognized: ${invalid.join(', ')}`,'error');return;} setSymbols(current=>[...current,...next]); setDraft(''); onNotify?.(lang==='zh'?'已加入和弦':'Chords added'); };
+            const move = (index, delta) => setSymbols(current=>{const target=index+delta;if(target<0||target>=current.length)return current;const copy=[...current];[copy[index],copy[target]]=[copy[target],copy[index]];return copy;});
+            return <section className="feature-page max-w-6xl mx-auto mt-16 animate-in"><div className="feature-heading"><span>GUITAR HELPER GM</span><h2>{lang==='zh'?'多重和弦查詢':'Multi-Chord Query'}</h2><p>{lang==='zh'?'一次排列多個和弦、保留轉調與移調夾，並為每個結果開啟完整的指法與把位控制。':'Arrange several chord symbols at once, keep transposition and capo support, then open full voicing controls for each result.'}</p></div><div className="multi-query-controls"><label>{lang==='zh'?'新增和弦':'Add chords'}<input value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();addSymbols();}}} placeholder="C Am F G7"/></label><button type="button" onClick={addSymbols}>{lang==='zh'?'加入':'Add'}</button><label>{lang==='zh'?'原調':'From'}<select value={from} onChange={event=>setFrom(event.target.value)}>{NOTES_C.map(note=><option key={note}>{note}</option>)}</select></label><label>{lang==='zh'?'目標調':'To'}<select value={to} onChange={event=>setTo(event.target.value)}>{NOTES_C.map(note=><option key={note}>{note}</option>)}</select></label><label>{lang==='zh'?'半音':'Semitones'}<select value={shiftOverride} onChange={event=>setShiftOverride(event.target.value)}><option value="">{lang==='zh'?'依調性':'By key'}</option>{Array.from({length:23},(_,index)=>index-11).map(number=><option key={number} value={number}>{number>0?`+${number}`:number}</option>)}</select></label><label>Capo<select value={capo} onChange={event=>setCapo(Number(event.target.value))}>{Array.from({length:13},(_,index)=><option key={index} value={index}>{index}</option>)}</select></label><span>{lang==='zh'?`目前轉調：${shift} 個半音`:`Current shift: ${shift} semitones`}</span></div><div className="multi-query-list">{symbols.map((symbol,index)=>{const item=parseChordSymbol(symbol,chordTypes);if(!item)return null;const soundingPc=(item.rootPc+shift+12)%12;const shapePc=(soundingPc-capo+12)%12;const sounding=spellPc(soundingPc,item.preferFlats);const shape=spellPc(shapePc,item.preferFlats);const dots=generateVoicings(shapePc,item.type,[6,5,4,3],true,true)[0]||[];const record={...buildVoicingRecord(shape,item.type,dots,capo),soundingRoot:sounding};return <article className="multi-chord-card" key={`${symbol}-${index}`}><div className="multi-card-head"><span>{index+1}</span><div><h3>{symbol} <i>→</i> {sounding}{item.type.label}</h3><small>{capo?(lang==='zh'?`按奏：${shape}${item.type.label}（Capo ${capo}）`:`Shape: ${shape}${item.type.label} (Capo ${capo})`):(lang==='zh'?`發聲：${sounding}${item.type.label}`:`Sounding: ${sounding}${item.type.label}`)}</small></div><div className="multi-order"><button onClick={()=>move(index,-1)} disabled={index===0} aria-label="Move chord earlier">↑</button><button onClick={()=>move(index,1)} disabled={index===symbols.length-1} aria-label="Move chord later">↓</button><button onClick={()=>setSymbols(current=>current.filter((_,itemIndex)=>itemIndex!==index))} aria-label="Remove chord">×</button></div></div><Fretboard dots={dots} disp="note" ariaLabel={`${sounding}${item.type.label} fretboard`}/><div className="saved-actions"><button onClick={()=>playNotes(dots,'guitar')}>{lang==='zh'?'播放':'Play'}</button><button onClick={()=>onOpen(record)}>{lang==='zh'?'指法與把位':'Voicing controls'}</button><button onClick={()=>onFavorite(record)}>{lang==='zh'?'收藏':'Save'}</button><button onClick={()=>onCompare(record)}>{lang==='zh'?'比較':'Compare'}</button></div></article>})}</div>{!parsed.length&&<div className="feature-empty"><b>{lang==='zh'?'尚未找到和弦':'No chords found'}</b><p>{lang==='zh'?'請輸入例如 C、Am、F、G7、Bbmaj7 或 F#m7b5。':'Try C, Am, F, G7, Bbmaj7, or F#m7b5.'}</p></div>}</section>;
+        };
+
+        const DetailSheet = ({ root, typeObj, mode, onClose, t, lang, presetVoicing, presetOptions, onFavorite, isFavorite, onCompare, isCompared, onVoicingViewed }) => {
             const [disp, setDisp] = useState('note');
-            const [vMode, setVMode] = useState('arpeggio');
-            const [selectedStrings, setSelectedStrings] = useState([6,5,4,3]);
-            const [includeRoot, setIncludeRoot] = useState(true);
+            const [vMode, setVMode] = useState(presetVoicing ? 'voicing' : 'arpeggio');
+            const [selectedStrings, setSelectedStrings] = useState(presetOptions?.selectedStrings || [6,5,4,3]);
+            const [includeRoot, setIncludeRoot] = useState(presetOptions?.includeRoot ?? true);
             const [vIndex, setVIndex] = useState(0);
-            const [isFriendly, setIsFriendly] = useState(false);
+            const [isFriendly, setIsFriendly] = useState(presetOptions?.isFriendly ?? false);
             const [instrument, setInstrument] = useState('guitar');
+            const [restoredVoicing, setRestoredVoicing] = useState(presetVoicing || null);
 
             const { dots, availableVoicings } = useMemo(() => {
                 const rootPc = NOTES_C.indexOf(root);
                 if (mode === 'chord' && vMode === 'voicing') {
                     const vs = generateVoicings(rootPc, typeObj, selectedStrings, includeRoot, isFriendly);
-                    return { dots: vs[vIndex] || [], availableVoicings: vs.length };
+                    return { dots: restoredVoicing || vs[vIndex] || [], availableVoicings: vs.length };
                 }
 
                 const res = [];
@@ -437,15 +589,19 @@
                     }
                 }
                 return { dots: res, availableVoicings: 0 };
-            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly]);
+            }, [root, typeObj, mode, vMode, selectedStrings, includeRoot, vIndex, isFriendly, restoredVoicing]);
 
+            const currentRecord = mode === 'chord' && vMode === 'voicing' && dots.length ? {...buildVoicingRecord(root, typeObj, dots), includeRoot, isFriendly, selectedStrings} : null;
+            useEffect(() => { if (currentRecord) onVoicingViewed?.(currentRecord); }, [root, typeObj, vMode, includeRoot, isFriendly, selectedStrings.join(','), vIndex, dots.map(dot=>`${dot.string}:${dot.fret}`).join('|')]);
+            const resetPreset = () => setRestoredVoicing(null);
             const toggleString = (string) => {
                 setSelectedStrings(previous => {
                     const next = previous.includes(string) ? previous.filter(s=>s!==string) : [...previous,string];
                     return next.sort((a,b)=>b-a);
                 });
-                setVIndex(0);
+                setVIndex(0); resetPreset();
             };
+            const resetVoicingOptions = () => { setSelectedStrings([6,5,4,3]); setIncludeRoot(true); setIsFriendly(false); setVIndex(0); resetPreset(); };
 
             return (
                 <div className="gallery-overlay animate-in">
@@ -464,27 +620,17 @@
                                     {mode === 'chord' && vMode === 'voicing' && !includeRoot && <span className="rootless-badge">{lang==='zh'?'無根音排列':'Rootless voicing'}</span>}
                                 </div>
                             </div>
-                            <div className="flex flex-col gap-4 items-end">
-                                <div className="flex gap-4">
-                                    <button onClick={()=>playNotes(dots,instrument)} className="minimal-btn">{t.play}</button>
-                                    <button onClick={()=>setDisp(disp==='note'?'deg':'note')} className="minimal-btn">
-                                        {lang === 'zh' ? (disp === 'note' ? '顯示度數' : '顯示音名') : (disp === 'note' ? 'Show Degrees' : 'Show Notes')}
-                                    </button>
+                            <div className="detail-actions-wrap">
+                                <div className="detail-action-row" aria-label={lang==='zh'?'和弦操作':'Chord actions'}>
+                                    <button onClick={()=>playNotes(dots,instrument)} className="detail-icon-btn" title={t.play}><span aria-hidden="true">▶</span>{t.play}</button>
+                                    <button onClick={()=>setDisp(disp==='note'?'deg':'note')} className="detail-icon-btn" title={lang === 'zh' ? (disp === 'note' ? '顯示度數' : '顯示音名') : (disp === 'note' ? 'Show Degrees' : 'Show Notes')}><span aria-hidden="true">◎</span>{lang === 'zh' ? (disp === 'note' ? '度數' : '音名') : (disp === 'note' ? 'Degrees' : 'Notes')}</button>
+                                    {mode === 'chord' && <button onClick={()=>{setVMode(vMode==='voicing'?'arpeggio':'voicing');setVIndex(0);resetPreset();}} className={`detail-icon-btn ${vMode==='voicing'?'active':''}`}><span aria-hidden="true">⌘</span>{lang==='zh'?(vMode==='voicing'?'指法':'切換指法'):(vMode==='voicing'?'Voicing':'Voicing mode')}</button>}
+                                    {currentRecord && <><button onClick={()=>onFavorite?.(currentRecord)} className={`detail-icon-btn ${isFavorite?.(currentRecord)?'active':''}`}><span aria-hidden="true">{isFavorite?.(currentRecord)?'♥':'♡'}</span>{lang==='zh'?(isFavorite?.(currentRecord)?'已收藏':'收藏'):(isFavorite?.(currentRecord)?'Saved':'Save')}</button><button onClick={()=>onCompare?.(currentRecord)} className={`detail-icon-btn ${isCompared?.(currentRecord)?'active':''}`}><span aria-hidden="true">⇄</span>{lang==='zh'?(isCompared?.(currentRecord)?'已比較':'比較'):(isCompared?.(currentRecord)?'Compared':'Compare')}</button></>}
                                 </div>
-                                <div className="instrument-switch" aria-label={lang==='zh'?'選擇音色':'Choose instrument'}>
+                                <div className="instrument-switch compact" aria-label={lang==='zh'?'選擇音色':'Choose instrument'}>
                                     <button onClick={()=>setInstrument('guitar')} className={instrument==='guitar'?'active':''}>{lang==='zh'?'吉他':'Guitar'}</button>
                                     <button onClick={()=>setInstrument('piano')} className={instrument==='piano'?'active':''}>{lang==='zh'?'鋼琴':'Piano'}</button>
                                 </div>
-                                {mode === 'chord' && (
-                                    <div className="flex bg-white/5 rounded-full p-1 mt-2">
-                                        <button onClick={()=>setVMode('arpeggio')} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='arpeggio'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
-                                            {lang==='zh'?'琶音全景':'Arpeggio'}
-                                        </button>
-                                        <button onClick={()=>{setVMode('voicing'); setVIndex(0);}} className={`px-4 py-1.5 text-[10px] uppercase tracking-widest rounded-full transition-all ${vMode==='voicing'?'bg-bronze text-black':'text-white hover:bg-white/10'}`}>
-                                            {lang==='zh'?'具體按法':'Voicing'}
-                                        </button>
-                                    </div>
-                                )}
                             </div>
                         </div>
 
@@ -493,25 +639,24 @@
                                 <div className="voicing-topline">
                                     <div className="root-control">
                                         <div><span>{lang==='zh'?'包含根音':'Include root'}</span><small>{includeRoot ? (lang==='zh'?'一般和弦排列':'Standard voicing') : (lang==='zh'?'由貝斯負責根音':'Bass-led rootless voicing')}</small></div>
-                                        <button role="switch" aria-checked={includeRoot} onClick={()=>{setIncludeRoot(v=>!v);setVIndex(0);}} className={`root-switch ${includeRoot?'on':''}`}><i></i></button>
+                                        <button role="switch" aria-checked={includeRoot} onClick={()=>{setIncludeRoot(v=>!v);setVIndex(0);resetPreset();}} className={`root-switch ${includeRoot?'on':''}`}><i></i></button>
                                     </div>
-                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);}} className={`friendly-toggle ${isFriendly?'active':''}`}>
+                                    <button onClick={()=>{setIsFriendly(!isFriendly); setVIndex(0);resetPreset();}} className={`friendly-toggle ${isFriendly?'active':''}`}>
                                         {lang==='zh'?'友好模式':'Friendly'} <small>{isFriendly ? (lang==='zh'?'窄跨度優先':'Narrow span') : (lang==='zh'?'進階排列':'Advanced')}</small>
                                     </button>
                                 </div>
-                                <div className="string-picker">
-                                    <div className="string-picker-head"><span>{lang==='zh'?'選擇琴弦':'Select strings'}</span><small>{lang==='zh'?'可任意多選；未選取琴弦不會出現在指法中':'Select any combination; unselected strings are excluded'}</small></div>
+                                <div className="string-picker simple-string-picker">
+                                    <div className="string-picker-head"><span>{lang==='zh'?'選擇可用琴弦':'Choose strings'}</span><small>{lang==='zh'?'點擊即可包含或排除；變更後立即重新找指法':'Tap to include or exclude a string; voicings update immediately'}</small></div>
                                     <div className="string-picker-lines">
-                                        {[6,5,4,3,2,1].map(string => <button key={string} onClick={()=>toggleString(string)} className={`string-choice ${selectedStrings.includes(string)?'selected':''}`}>
-                                            <b>{string}</b><span>{['E','A','D','G','B','E'][6-string]}</span><i></i>
-                                        </button>)}
+                                        {[6,5,4,3,2,1].map(string => <button type="button" key={string} onClick={()=>toggleString(string)} aria-pressed={selectedStrings.includes(string)} className={`string-toggle ${selectedStrings.includes(string)?'selected':''}`}><b>{string}</b><span>{['E','A','D','G','B','E'][6-string]}</span><i aria-hidden="true">{selectedStrings.includes(string)?'✓':'—'}</i></button>)}
                                     </div>
+                                    <div className="string-condition-actions"><button type="button" onClick={resetVoicingOptions}>{lang==='zh'?'恢復預設琴弦':'Reset strings'}</button></div>
                                 </div>
                                 {availableVoicings > 0 ? (
-                                    <div className="flex items-center gap-4 text-[11px] tracking-widest text-zinc-400">
-                                        <button onClick={()=>setVIndex(v => Math.max(0, v-1))} disabled={vIndex===0} className="hover:text-white disabled:opacity-30">&larr;</button>
-                                        <span>{lang==='zh'?'變體':'Variant'} {vIndex + 1} / {availableVoicings}</span>
-                                        <button onClick={()=>setVIndex(v => Math.min(availableVoicings-1, v+1))} disabled={vIndex===availableVoicings-1} className="hover:text-white disabled:opacity-30">&rarr;</button>
+                                    <div className="voicing-pager" aria-label={lang==='zh'?'指法與把位控制區':'Voicing and position controls'}>
+                                        <button type="button" onClick={()=>{setVIndex(v => Math.max(0, v-1));resetPreset();}} disabled={vIndex===0} className="voicing-step prev"><span aria-hidden="true">←</span><b>{lang==='zh'?'上一個':'Previous'}</b></button>
+                                        <div className="voicing-count"><span>{lang==='zh'?'目前指法':'Current voicing'}</span><b>{lang==='zh'?`指法 ${vIndex + 1}／${availableVoicings}`:`Voicing ${vIndex + 1} / ${availableVoicings}`}</b></div>
+                                        <button type="button" onClick={()=>{setVIndex(v => Math.min(availableVoicings-1, v+1));resetPreset();}} disabled={vIndex===availableVoicings-1} className="voicing-step next"><b>{lang==='zh'?'下一個':'Next'}</b><span aria-hidden="true">→</span></button>
                                     </div>
                                 ) : (
                                     <div className="text-[11px] tracking-widest text-red-400">{selectedStrings.length < 2 ? (lang==='zh'?'請至少選擇兩條琴弦':'Select at least two strings') : (lang==='zh'?'沒有符合根音、琴弦與可演奏性條件的指法':'No playable voicing matches the root, strings, and playability settings')}</div>
@@ -519,7 +664,7 @@
                             </div>
                         )}
 
-                        <Fretboard dots={dots} disp={disp} instrument={instrument} />
+                        <Fretboard dots={dots} disp={disp} instrument={instrument} full={mode !== 'chord' || vMode !== 'voicing'} ariaLabel={`${root} ${typeObj.label || ''} fretboard`} />
                     </div>
                 </div>
             );
@@ -537,12 +682,19 @@
                 return THEME_OPTIONS.some(option=>option.id===saved) ? saved : 'classic';
             });
             const [stylePanelOpen, setStylePanelOpen] = useState(false);
-            const [showUpdateNotice, setShowUpdateNotice] = useState(() => readLocal(UPDATE_NOTICE_STORAGE_KEY) !== 'read');
+            const [showUpdateNotice, setShowUpdateNotice] = useState(() => SHOULD_SHOW_RELEASE && readLocal(UPDATE_NOTICE_STORAGE_KEY) !== 'read');
             const [closingUpdateNotice, setClosingUpdateNotice] = useState(false);
             const [libraryQuery, setLibraryQuery] = useState('');
             const [simRoot, setSimRoot] = useState('C');
             const [simBaseId, setSimBaseId] = useState('Maj7');
             const [simAdditions, setSimAdditions] = useState([]);
+            const [customTone, setCustomTone] = useState('');
+            const [customToneError, setCustomToneError] = useState('');
+            const [customTonePreview, setCustomTonePreview] = useState([]);
+            const [favorites, setFavorites] = useState(() => readJson(FAVORITES_STORAGE_KEY, []));
+            const [recents, setRecents] = useState(() => readJson(RECENTS_STORAGE_KEY, []));
+            const [compareItems, setCompareItems] = useState([]);
+            const [notice, setNotice] = useState(null);
 
             useEffect(() => {
                 const TEXT = {
@@ -674,13 +826,21 @@
                 document.documentElement.lang = lang === 'zh' ? 'zh-Hant' : 'en';
                 document.title = lang === 'zh' ? '吉他顧問－2026 典藏版' : 'Guitar Advisor — 2026 Collection';
             }, [lang]);
+            useEffect(() => { writeLocal(FAVORITES_STORAGE_KEY, JSON.stringify(favorites)); }, [favorites]);
+            useEffect(() => { writeLocal(RECENTS_STORAGE_KEY, JSON.stringify(recents)); }, [recents]);
 
             if (!db) return <div className="h-screen flex items-center justify-center text-bronze tracking-[0.5em] text-[11px]">LOADING...</div>;
             const t = db.c.TEXT[lang] || db.c.TEXT['zh'];
 
             const simulatorBase = db.ch.CHORD_TYPES.find(item=>item.id===simBaseId) || db.ch.CHORD_TYPES[0];
             const simulatedChord = addNoteChord(simulatorBase, simAdditions);
-            const openSimulatedChord = () => setDetail({root:simRoot, typeObj:simulatedChord, mode:'chord'});
+            const simulatedPreviewDots = (() => {
+                const rootPc = NOTES_C.indexOf(simRoot);
+                const newest = simAdditions[simAdditions.length - 1];
+                const candidates = generateVoicings(rootPc, simulatedChord, [6,5,4,3], true, true);
+                return candidates.find(voicing => newest === undefined || voicing.some(note => note.interval === newest)) || candidates[0] || [];
+            })();
+            const openSimulatedChord = () => { setDetail({root:simRoot, typeObj:simulatedChord, mode:'chord'}); notify(lang==='zh'?'已開啟互動指板':'Interactive fretboard opened'); };
             const selectTheme = (nextTheme) => {
                 setTheme(nextTheme);
                 setStylePanelOpen(false);
@@ -694,9 +854,68 @@
             const toggleAddition = (interval) => {
                 if (simulatorBase.intervals.includes(interval)) return;
                 setSimAdditions(current => current.includes(interval) ? current.filter(i=>i!==interval) : current.length < 2 ? [...current,interval] : [...current.slice(1),interval]);
+                setCustomToneError('');
+            };
+            const addCustomTone = () => {
+                const raw = customTone.trim().replace(/♯/g,'#').replace(/♭/g,'b');
+                const rootPc = NOTES_C.indexOf(simRoot);
+                const scaleIntervals = {1:0,2:2,3:4,4:5,5:7,6:9,7:11,8:0,9:2,11:5,13:9};
+                let interval;
+                let namedPc = null;
+                const noteMatch = raw.match(/^([A-Ga-g])([#b]?)$/);
+                const degreeMatch = raw.match(/^([b#]?)(1|2|3|4|5|6|7|8|9|11|13)$/i);
+                if (noteMatch) {
+                    const spelling = `${noteMatch[1].toUpperCase()}${noteMatch[2]}`;
+                    const canonical = NOTE_ALIASES[spelling.toUpperCase()] || spelling;
+                    namedPc = NOTES_C.indexOf(canonical);
+                    if (namedPc < 0) { setCustomToneError(lang==='zh'?'無法辨識此音名。':'This note name is not recognized.'); return; }
+                    interval = (namedPc - rootPc + 12) % 12;
+                } else if (degreeMatch) {
+                    const alteration = degreeMatch[1] === 'b' ? -1 : degreeMatch[1] === '#' ? 1 : 0;
+                    interval = (scaleIntervals[degreeMatch[2]] + alteration + 12) % 12;
+                } else {
+                    setCustomToneError(lang==='zh'?'請輸入 A–G 音名（可加 #／b）或音級／音程，例如 3、♭3、#4、9、11、13。':'Enter an A–G note (optional #/b), or a degree/interval such as 3, b3, #4, 9, 11, or 13.');
+                    return;
+                }
+                if (simulatorBase.intervals.includes(interval)) { setCustomToneError(lang==='zh'?'這個音已包含在基礎和弦中。':'This tone is already in the base chord.'); return; }
+                const nextAdditions = simAdditions.includes(interval) ? simAdditions : [...simAdditions.slice(-1),interval];
+                const nextChord = addNoteChord(simulatorBase, nextAdditions);
+                const candidates = generateVoicings(rootPc, nextChord, [6,5,4,3], true, true);
+                const preview = candidates.find(voicing => voicing.some(note => note.interval === interval)) || candidates[0] || [];
+                if (!preview.length) { setCustomToneError(lang==='zh'?'目前的和弦找不到可演奏的自動加音指法；請改用其他音或開啟詳細頁選擇不同琴弦。':'No playable automatic voicing was found for this addition. Try another note or choose different strings in the detail view.'); return; }
+                setSimAdditions(nextAdditions);
+                setCustomTonePreview(preview);
+                setCustomToneError('');
+                notify(lang==='zh'?`已加入 ${namedPc !== null ? NOTES_C[namedPc] : raw}，並找到可用指法`:`Added ${namedPc !== null ? NOTES_C[namedPc] : raw} and found a playable voicing`);
+            };
+            const resetCustomTone = () => { setCustomTone(''); setCustomToneError(''); setCustomTonePreview([]); setSimAdditions([]); };
+            const notify = (message, type='success') => {
+                setNotice({message,type,id:Date.now()});
+                window.setTimeout(()=>setNotice(current=>current?.message===message ? null : current), 2400);
+            };
+            const toggleFavorite = (record) => setFavorites(current => {
+                const exists = current.some(item=>item.key===record.key);
+                notify(lang==='zh' ? (exists ? '已從收藏移除' : '已加入收藏') : (exists ? 'Removed from favorites' : 'Added to favorites'));
+                return exists ? current.filter(item=>item.key!==record.key) : [{...record,savedAt:new Date().toISOString()},...current];
+            });
+            const addRecent = (record) => setRecents(current => [{...record,viewedAt:new Date().toISOString()},...current.filter(item=>item.key!==record.key)].slice(0,MAX_RECENTS));
+            const toggleCompare = (record) => setCompareItems(current => {
+                const exists = current.some(item=>item.key===record.key);
+                notify(lang==='zh' ? (exists ? '已從比較區移除' : '已加入指法比較') : (exists ? 'Removed from comparison' : 'Added to comparison'));
+                return exists ? current.filter(item=>item.key!==record.key) : [...current,record].slice(-3);
+            });
+            const restoreRecord = (record) => {
+                const known = db.ch.CHORD_TYPES.find(item=>item.id===record.typeId);
+                const restoredType = known || {id:record.typeId,label:record.label,zh:record.zh||record.label,en:record.en||record.label,formula:record.formula,intervals:record.intervals||[]};
+                setDetail({root:record.root,typeObj:restoredType,mode:'chord',presetVoicing:record.dots,presetOptions:record});
             };
 
             const renderMain = () => {
+                if (mode === 'favorites') return <CollectionPage kind="favorites" items={favorites} lang={lang} onOpen={restoreRecord} onRemove={key=>setFavorites(current=>current.filter(item=>item.key!==key))} onFavorite={toggleFavorite} onCompare={toggleCompare}/>;
+                if (mode === 'recent') return <CollectionPage kind="recent" items={recents} lang={lang} onOpen={restoreRecord} onRemove={key=>setRecents(current=>current.filter(item=>item.key!==key))} onClear={()=>setRecents([])} onCompare={toggleCompare}/>;
+                if (mode === 'compare') return <ComparePage items={compareItems} lang={lang} onOpen={restoreRecord} onRemove={key=>setCompareItems(current=>current.filter(item=>item.key!==key))}/>;
+                if (mode === 'practice') return <PracticeMode chordTypes={db.ch.CHORD_TYPES} lang={lang} onNotify={notify}/>;
+                if (mode === 'transpose') return <MultiChordQuery chordTypes={db.ch.CHORD_TYPES} lang={lang} onOpen={restoreRecord} onFavorite={toggleFavorite} onCompare={toggleCompare} onNotify={notify}/>;
                 if (mode === 'theory') {
                     const lessons = lang === 'zh' ? [
                         {no:'01',title:'指板上的音程',body:'把根音當作 1。往高一格是小二度，兩格是大二度，三格是小三度，四格是大三度，七格是完全五度。相同形狀移到不同根音，音程關係不變。',tip:'先記住第 6、5 弦根音，再用形狀定位其他音。'},
@@ -735,10 +954,11 @@
                             <h2>{lang==='zh'?'以既有和弦為基礎，加入一或兩個音':'Start with a chord, then add one or two notes'}</h2>
                             <p>{lang==='zh'?'系統會先辨識原和弦，再依新增音給出常用名稱、實際音組與可演奏指法。':'The system identifies the base chord first, then names the result and finds playable guitar voicings.'}</p>
                             <div className="simulator-grid">
-                                <div className="sim-step"><span>01</span><label>{lang==='zh'?'選擇根音':'Choose root'}</label><div className="root-pills">{NOTES_C.map(note=><button key={note} onClick={()=>setSimRoot(note)} className={simRoot===note?'selected':''}>{note}</button>)}</div></div>
-                                <div className="sim-step"><span>02</span><label>{lang==='zh'?'選擇基礎和弦':'Choose base chord'}</label><select value={simBaseId} onChange={e=>{setSimBaseId(e.target.value);setSimAdditions([]);}}>{baseChoices.map(id=>{const item=db.ch.CHORD_TYPES.find(ch=>ch.id===id); return <option key={id} value={id}>{simRoot}{item.label || 'Major'} — {lang==='zh'?item.zh:item.en}</option>})}</select></div>
-                                <div className="sim-step"><span>03</span><label>{lang==='zh'?'加入一或兩個音':'Add one or two notes'}</label><div className="add-tone-pills">{ADDABLE_TONES.map(tone=>{const exists=simulatorBase.intervals.includes(tone.interval); const selected=simAdditions.includes(tone.interval); return <button key={tone.symbol} disabled={exists} onClick={()=>toggleAddition(tone.interval)} className={selected?'selected':''}>{tone.symbol}<small>{exists ? (lang==='zh'?'已包含':'included') : (lang==='zh'?tone.zh:tone.en)}</small></button>})}</div></div>
-                            </div>
+                                <div className="sim-step"><span>01</span><label>{lang==='zh'?'選擇根音':'Choose root'}</label><div className="root-pills">{NOTES_C.map(note=><button key={note} onClick={()=>{setSimRoot(note);setCustomTonePreview([]);setCustomToneError('');}} className={simRoot===note?'selected':''}>{note}</button>)}</div></div>
+                                <div className="sim-step"><span>02</span><label>{lang==='zh'?'選擇基礎和弦':'Choose base chord'}</label><select value={simBaseId} onChange={e=>{setSimBaseId(e.target.value);setSimAdditions([]);setCustomTonePreview([]);setCustomToneError('');}}>{baseChoices.map(id=>{const item=db.ch.CHORD_TYPES.find(ch=>ch.id===id); return <option key={id} value={id}>{simRoot}{item.label || 'Major'} — {lang==='zh'?item.zh:item.en}</option>})}</select></div>
+                                 <div className="sim-step"><span>03</span><label>{lang==='zh'?'加入一或兩個音':'Add one or two notes'}</label><div className="add-tone-pills">{ADDABLE_TONES.map(tone=>{const exists=simulatorBase.intervals.includes(tone.interval); const selected=simAdditions.includes(tone.interval); return <button key={tone.symbol} disabled={exists} onClick={()=>toggleAddition(tone.interval)} className={selected?'selected':''}>{tone.symbol}<small>{exists ? (lang==='zh'?'已包含':'included') : (lang==='zh'?tone.zh:tone.en)}</small></button>})}</div></div>
+                             </div>
+                            <div className="custom-add-tone"><div><span>04</span><h3>{lang==='zh'?'智慧自訂加音':'Smart add-note'}</h3><p>{lang==='zh'?'只要輸入音名或音級；系統會依目前和弦自動找到容易按奏的琴弦與琴格。':'Enter only a note or degree. The system finds a playable string and fret from the current chord.'}</p></div><label>{lang==='zh'?'音名／音級':'Note / degree'}<input value={customTone} onChange={event=>setCustomTone(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();addCustomTone();}}} placeholder="A, Bb, 3, ♭3, #4, 9"/></label><button type="button" onClick={addCustomTone}>{lang==='zh'?'自動加入':'Add automatically'}</button><button type="button" onClick={resetCustomTone}>{lang==='zh'?'還原':'Reset'}</button>{customToneError&&<div className="custom-tone-error" role="alert">{customToneError}</div>}<div className="custom-tone-preview"><Fretboard dots={customTonePreview.length ? customTonePreview : simulatedPreviewDots} disp="note" ariaLabel="Smart add-note voicing"/><small>{lang==='zh'?(customTonePreview.length?'已依目前和弦找出可演奏位置；可在「查看指法」中改用其他把位或琴弦。':'預覽會隨快速加音與自訂加音同步更新。'):(customTonePreview.length?'A playable position was found. Open voicings to choose other positions or strings.':'The preview updates with both quick and custom additions.')}</small></div></div>
                             <div className="builder-preview">
                                 <span>{lang==='zh'?'分析結果':'Analysis'}</span>
                                 <strong>{simRoot}{simulatedChord.label}</strong>
@@ -859,9 +1079,14 @@
                             <button onClick={()=>{setMode('builder'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='builder'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'和弦加音模擬器':'Add-Note Simulator'}</button>
                             <button onClick={()=>{setMode('theory'); setCatId(null); setTypeObj(null);}} className={`text-[13px] tracking-[0.4em] pb-2 border-b-2 transition-all ${mode==='theory'?'text-bronze border-bronze':'text-zinc-500 border-transparent hover:text-zinc-300'}`}>{lang==='zh'?'基本樂理':'Music Theory'}</button>
                         </div>
+                        <div className="feature-nav" aria-label={lang==='zh'?'個人工具':'Personal tools'}>
+                            {[['favorites',lang==='zh'?'我的收藏':'Favorites'],['recent',lang==='zh'?'最近瀏覽':'Recent'],['compare',lang==='zh'?'指法比較':'Compare'],['practice',lang==='zh'?'練習模式':'Practice'],['transpose',lang==='zh'?'多重和弦查詢':'Multi-Chord Query']].map(([id,label])=><button key={id} onClick={()=>{setMode(id);setCatId(null);setTypeObj(null);}} className={mode===id?'active':''}>{label}{id==='compare'&&compareItems.length>0?<sup>{compareItems.length}</sup>:null}</button>)}
+                            {SHOULD_SHOW_RELEASE && <button type="button" onClick={()=>{setClosingUpdateNotice(false);setShowUpdateNotice(true);}}>{lang==='zh'?'更新懶人包':'What’s new'}</button>}
+                        </div>
                     </header>
                     <main>{renderMain()}</main>
-                    {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} />}
+                    {detail && <DetailSheet {...detail} onClose={()=>setDetail(null)} t={t} lang={lang} onFavorite={toggleFavorite} isFavorite={record=>favorites.some(item=>item.key===record.key)} onCompare={toggleCompare} isCompared={record=>compareItems.some(item=>item.key===record.key)} onVoicingViewed={addRecent} />}
+                    <ActionToast notice={notice}/>
                     {showUpdateNotice && <UpdateNotice lang={lang} closing={closingUpdateNotice} onDismiss={dismissUpdateNotice} />}
                     <footer className="text-center py-10 mt-20 border-t border-white/5">
                         <p className="text-[10px] text-zinc-600 tracking-[0.25em] uppercase">
@@ -871,6 +1096,9 @@
                             {lang === 'zh' ? '更多作品請至' : 'Visit us at'}{' '}
                             <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="text-bronze/60 hover:text-bronze transition-colors underline underline-offset-2">
                                 {lang === 'zh' ? 'Brian&Code 官方網站' : 'Brian&Code Official Website'}
+                            </a>
+                            <a href="./updates.html" className="text-bronze/60 hover:text-bronze transition-colors underline underline-offset-2">
+                                {lang === 'zh' ? '版本更新紀錄' : 'Release notes'}
                             </a>
                         </p>
                     </footer>
