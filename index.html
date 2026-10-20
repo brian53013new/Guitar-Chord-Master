@@ -328,11 +328,10 @@
             highlights:['和弦分類、名稱與音程分析更一致','六弦包含／排除切換','單行圖示化和弦操作列','輸入音名或音級即可自動找加音指法'],
             improvements:['加音預覽、替換把位與互動指板使用同一套指法資料','多重和弦查詢、轉調與移調夾整合','收藏、最近瀏覽、比較與六種風格保存'],
             fixes:['移除詳細頁過度複雜的必須／靜音琴弦限制','移除聽辨選擇題與答題統計的舊狀態流程'],
-            officialReleaseUrl:'https://brian53013new.github.io/Guitar-Chord-Master/'
+            officialReleaseUrl:'./updates.html'
         };
         const UPDATE_NOTICE_STORAGE_KEY = `guitar-helper-gm-update-${RELEASE_DIGEST.version}`;
         const IS_RELEASE_PREVIEW = RELEASE_DIGEST.status === 'draft' && (
-            new URLSearchParams(window.location.search).get('previewRelease') === '1' ||
             window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ||
             window.location.hostname.endsWith('.chatgpt.site')
         );
@@ -1097,6 +1096,9 @@
                             {lang === 'zh' ? '更多作品請至' : 'Visit us at'}{' '}
                             <a href="https://brian53013new.github.io/Brian-Code-Official-website/" target="_blank" rel="noopener noreferrer" className="text-bronze/60 hover:text-bronze transition-colors underline underline-offset-2">
                                 {lang === 'zh' ? 'Brian&Code 官方網站' : 'Brian&Code Official Website'}
+                            </a>
+                            <a href="./updates.html" className="text-bronze/60 hover:text-bronze transition-colors underline underline-offset-2">
+                                {lang === 'zh' ? '版本更新紀錄' : 'Release notes'}
                             </a>
                         </p>
                     </footer>
